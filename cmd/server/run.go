@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/vshulcz/Golectra/internal/misc"
 	"github.com/vshulcz/Golectra/internal/store"
 )
 
@@ -12,7 +13,7 @@ func run(listenAndServe func(addr string, handler http.Handler) error) error {
 	h := NewHandler(st)
 	r := NewRouter(h)
 
-	addr := ":8080"
-	log.Printf("Starting server at http://localhost%s\n", addr)
+	addr := misc.Getenv("HTTP_ADDR", "localhost:8080")
+	log.Printf("Starting server at http://%s", addr)
 	return listenAndServe(addr, r)
 }
