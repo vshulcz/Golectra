@@ -12,7 +12,7 @@ import (
 )
 
 func TestRun_UsesEnvAndCallsStart(t *testing.T) {
-	t.Setenv("SERVER_URL", "http://abc:123")
+	t.Setenv("ADDRESS", "http://abc:123")
 	t.Setenv("POLL_INTERVAL", "1s")
 	t.Setenv("REPORT_INTERVAL", "5s")
 
@@ -30,8 +30,8 @@ func TestRun_UsesEnvAndCallsStart(t *testing.T) {
 		return &fakeAgent{}
 	})
 
-	if gotCfg.ServerURL != "http://abc:123" {
-		t.Errorf("wrong ServerURL: %s", gotCfg.ServerURL)
+	if gotCfg.Address != "http://abc:123" {
+		t.Errorf("wrong Address: %s", gotCfg.Address)
 	}
 	if gotCfg.PollInterval != 1*time.Second {
 		t.Errorf("wrong PollInterval: %v", gotCfg.PollInterval)

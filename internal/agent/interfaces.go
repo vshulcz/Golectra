@@ -8,7 +8,7 @@ type Agent interface {
 }
 
 type Config struct {
-	ServerURL      string
+	Address        string
 	PollInterval   time.Duration
 	ReportInterval time.Duration
 }

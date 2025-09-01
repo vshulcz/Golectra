@@ -7,7 +7,7 @@ import (
 )
 
 func TestApplyAgentFlags_SetsEnv_All(t *testing.T) {
-	t.Setenv("SERVER_URL", "")
+	t.Setenv("ADDRESS", "")
 	t.Setenv("REPORT_INTERVAL", "")
 	t.Setenv("POLL_INTERVAL", "")
 
@@ -17,8 +17,8 @@ func TestApplyAgentFlags_SetsEnv_All(t *testing.T) {
 		t.Fatalf("applyAgentFlags error: %v", err)
 	}
 
-	if got := os.Getenv("SERVER_URL"); got != "http://localhost:9090" {
-		t.Fatalf("SERVER_URL = %q, want %q", got, "http://localhost:9090")
+	if got := os.Getenv("ADDRESS"); got != "http://localhost:9090" {
+		t.Fatalf("ADDRESS = %q, want %q", got, "http://localhost:9090")
 	}
 	if got := os.Getenv("REPORT_INTERVAL"); got != "5s" {
 		t.Fatalf("REPORT_INTERVAL = %q, want %q", got, "5s")
@@ -29,23 +29,23 @@ func TestApplyAgentFlags_SetsEnv_All(t *testing.T) {
 }
 
 func TestApplyAgentFlags_NormalizesScheme(t *testing.T) {
-	t.Setenv("SERVER_URL", "")
+	t.Setenv("ADDRESS", "")
 	var out bytes.Buffer
 
 	if err := applyAgentFlags([]string{"-a=https://example:443"}, &out); err != nil {
 		t.Fatalf("applyAgentFlags error: %v", err)
 	}
-	if got := os.Getenv("SERVER_URL"); got != "https://example:443" {
-		t.Fatalf("SERVER_URL = %q, want %q", got, "https://example:443")
+	if got := os.Getenv("ADDRESS"); got != "https://example:443" {
+		t.Fatalf("ADDRESS = %q, want %q", got, "https://example:443")
 	}
 
-	t.Setenv("SERVER_URL", "")
+	t.Setenv("ADDRESS", "")
 	out.Reset()
 	if err := applyAgentFlags([]string{"-a=example:8080"}, &out); err != nil {
 		t.Fatalf("applyAgentFlags error: %v", err)
 	}
-	if got := os.Getenv("SERVER_URL"); got != "http://example:8080" {
-		t.Fatalf("SERVER_URL = %q, want %q", got, "http://example:8080")
+	if got := os.Getenv("ADDRESS"); got != "http://example:8080" {
+		t.Fatalf("ADDRESS = %q, want %q", got, "http://example:8080")
 	}
 }
 

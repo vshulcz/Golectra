@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	DefaultServerAddr     = "localhost:8080"
+	DefaultServerAddr     = "http://localhost:8080"
 	DefaultReportInterval = 10
 	DefaultPollInterval   = 2
 )
@@ -36,7 +36,7 @@ func applyAgentFlags(args []string, out io.Writer) error {
 			if !strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://") {
 				v = "http://" + v
 			}
-			os.Setenv("SERVER_URL", v)
+			os.Setenv("ADDRESS", v)
 		case "r":
 			if *report > 0 {
 				os.Setenv("REPORT_INTERVAL", fmt.Sprintf("%ds", *report))
