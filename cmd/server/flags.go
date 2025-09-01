@@ -20,7 +20,7 @@ func applyServerFlags(args []string, out io.Writer) error {
 	}
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "a" && *addr != "" {
-			os.Setenv("HTTP_ADDR", *addr)
+			os.Setenv("ADDRESS", *addr)
 		}
 	})
 	return nil

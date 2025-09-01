@@ -4,51 +4,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"text/template"
 
 	"github.com/gin-gonic/gin"
 	"github.com/vshulcz/Golectra/internal/store"
 	"github.com/vshulcz/Golectra/models"
 )
-
-var indexTmpl = template.Must(template.New("index").Parse(`
-<!doctype html>
-<html>
-<head>
-	<meta charset="utf-8">
-	<title>metrics</title>
-	<style>
-		body { font-family: system-ui, Arial, sans-serif; }
-		table { border-collapse: collapse; margin-bottom: 1em; }
-		td, th { border: 1px solid #ddd; padding: 6px 10px; }
-		h2 { margin-top: 1.5em; }
-	</style>
-</head>
-<body>
-	<h1>Metrics</h1>
-
-	<h2>Gauge</h2>
-	<table>
-		<tr><th>Name</th><th>Value</th></tr>
-		{{range $name, $val := .Gauge}}
-			<tr><td>{{ $name }}</td><td>{{ printf "%.6g" $val }}</td></tr>
-		{{else}}
-			<tr><td colspan="2"><em>No data</em></td></tr>
-		{{end}}
-	</table>
-
-	<h2>Counter</h2>
-	<table>
-		<tr><th>Name</th><th>Value</th></tr>
-		{{range $name, $val := .Counter}}
-			<tr><td>{{ $name }}</td><td>{{ $val }}</td></tr>
-		{{else}}
-			<tr><td colspan="2"><em>No data</em></td></tr>
-		{{end}}
-	</table>
-</body>
-</html>
-`))
 
 type Handler struct {
 	storage store.Storage
@@ -119,16 +79,33 @@ func (h *Handler) GetMetric(c *gin.Context) {
 func (h *Handler) Index(c *gin.Context) {
 	g, cnt := h.storage.Snapshot()
 
-	data := struct {
-		Gauge   map[string]float64
-		Counter map[string]int64
-	}{
-		Gauge:   g,
-		Counter: cnt,
-	}
+	var sb strings.Builder
+	sb.WriteString("<!doctype html><html><head><meta charset='utf-8'><title>metrics</title>")
+	sb.WriteString("<style>body{font-family:system-ui,Arial,sans-serif}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:6px 10px}</style>")
+	sb.WriteString("</head><body>")
+	sb.WriteString("<h1>Metrics</h1>")
 
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	if err := indexTmpl.Execute(c.Writer, data); err != nil {
-		http.Error(c.Writer, err.Error(), http.StatusInternalServerError)
+	sb.WriteString("<h2>Gauge</h2><table><tr><th>Name</th><th>Value</th></tr>")
+	for k, v := range g {
+		sb.WriteString("<tr><td>")
+		sb.WriteString(k)
+		sb.WriteString("</td><td>")
+		sb.WriteString(strconv.FormatFloat(v, 'f', -1, 64))
+		sb.WriteString("</td></tr>")
 	}
+	sb.WriteString("</table>")
+
+	sb.WriteString("<h2>Counter</h2><table><tr><th>Name</th><th>Value</th></tr>")
+	for k, v := range cnt {
+		sb.WriteString("<tr><td>")
+		sb.WriteString(k)
+		sb.WriteString("</td><td>")
+		sb.WriteString(strconv.FormatInt(v, 10))
+		sb.WriteString("</td></tr>")
+	}
+	sb.WriteString("</table>")
+
+	sb.WriteString("</body></html>")
+
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(sb.String()))
 }

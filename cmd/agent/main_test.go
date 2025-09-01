@@ -19,7 +19,7 @@ func (f *fakeAgent) Start() { f.startCalled = true }
 func (f *fakeAgent) Stop()  {}
 
 func Test_runAgent_UsesConfigAndCallsStart(t *testing.T) {
-	t.Setenv("SERVER_URL", "http://test:1234")
+	t.Setenv("ADDRESS", "http://test:1234")
 	t.Setenv("POLL_INTERVAL", "1s")
 	t.Setenv("REPORT_INTERVAL", "3s")
 
@@ -40,8 +40,8 @@ func Test_runAgent_UsesConfigAndCallsStart(t *testing.T) {
 	if !fa.startCalled {
 		t.Errorf("Start() was not called")
 	}
-	if fa.cfg.ServerURL != "http://test:1234" {
-		t.Errorf("wrong ServerURL: %s", fa.cfg.ServerURL)
+	if fa.cfg.Address != "http://test:1234" {
+		t.Errorf("wrong Address: %s", fa.cfg.Address)
 	}
 	if fa.cfg.PollInterval != 1*time.Second {
 		t.Errorf("wrong PollInterval: %v", fa.cfg.PollInterval)
