@@ -1,0 +1,107 @@
+name: autotests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  branchtest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check branch name
+        run: |
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+          if [[ ! "$BRANCH" =~ ^feature/increment_[0-9]+$ && "$BRANCH" != "main" ]]; then
+            echo "Branch name must match pattern 'feature/increment_<number>' or be 'main'"
+            echo "Your branch is $BRANCH"
+            exit 1
+          else
+            echo "Branch is valid: $BRANCH"
+          fi
+
+  metricstest:
+    runs-on: ubuntu-latest
+    container: golang:1.25
+    needs: branchtest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Download autotests binaries
+        uses: robinraju/release-downloader@v1.8
+        with:
+          repository: Yandex-Practicum/go-autotests
+          latest: true
+          fileName: "*"
+          out-file-path: .tools
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup autotest binary
+        run: |
+          chmod -R +x $GITHUB_WORKSPACE/.tools
+          mv $GITHUB_WORKSPACE/.tools/metricstest /usr/local/bin/metricstest
+          mv $GITHUB_WORKSPACE/.tools/random /usr/local/bin/random
+
+      - name: Setup go deps
+        run: |
+          go install golang.org/x/tools/cmd/goimports@latest
+
+      - name: Build server binary
+        run: |
+          cd cmd/server
+          go build -buildvcs=false -o server
+
+      - name: "Code increment #1"
+        if: |
+          github.ref == 'refs/heads/main' ||
+          github.head_ref == 'increment_1' ||
+          github.head_ref == 'increment_2' ||
+          github.head_ref == 'increment_3' ||
+          github.head_ref == 'increment_4'
+        run: |
+          metricstest -test.v -test.run=^TestIteration1$ \
+            -binary-path=cmd/server/server
+
+      - name: Build agent binary
+        run: |
+          cd cmd/agent
+          go build -buildvcs=false  -o agent
+
+      - name: "Code increment #2"
+        if: |
+          github.ref == 'refs/heads/main' ||
+          github.head_ref == 'increment_2' ||
+          github.head_ref == 'increment_3' ||
+          github.head_ref == 'increment_4'
+        run: |
+          metricstest -test.v -test.run=^TestIteration2[AB]*$ \
+            -source-path=. \
+            -agent-binary-path=cmd/agent/agent
+
+      - name: "Code increment #3"
+        if: |
+          github.ref == 'refs/heads/main' ||
+          github.head_ref == 'increment_3' ||
+          github.head_ref == 'increment_4'
+        run: |
+          metricstest -test.v -test.run=^TestIteration3[AB]*$ \
+            -source-path=. \
+            -agent-binary-path=cmd/agent/agent \
+            -binary-path=cmd/server/server
+
+      - name: "Code increment #4"
+        if: |
+          github.ref == 'refs/heads/main' ||
+          github.head_ref == 'increment_4'
+        run: |
+          SERVER_PORT=$(random unused-port)
+          metricstest -test.v -test.run=^TestIteration4$ \
+            -agent-binary-path=cmd/agent/agent \
+            -binary-path=cmd/server/server \
+            -server-port=$SERVER_PORT \
+            -source-path=.

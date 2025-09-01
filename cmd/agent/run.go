@@ -13,9 +13,9 @@ func run(newAgent func(agent.Config) interface {
 	Stop()
 }) {
 	cfg := agent.Config{
-		ServerURL:      misc.Getenv("SERVER_URL", "http://localhost:8080"),
-		PollInterval:   misc.GetDuration("POLL_INTERVAL", 2*time.Second),
-		ReportInterval: misc.GetDuration("REPORT_INTERVAL", 10*time.Second),
+		ServerURL:      misc.Getenv("SERVER_URL", DefaultServerAddr),
+		PollInterval:   misc.GetDuration("POLL_INTERVAL", DefaultPollInterval*time.Second),
+		ReportInterval: misc.GetDuration("REPORT_INTERVAL", DefaultReportInterval*time.Second),
 	}
 
 	a := newAgent(cfg)
