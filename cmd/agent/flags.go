@@ -8,6 +8,12 @@ import (
 	"strings"
 )
 
+const (
+	DefaultServerAddr     = "localhost:8080"
+	DefaultReportInterval = 10
+	DefaultPollInterval   = 2
+)
+
 func applyAgentFlags(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
 	if out == nil {
@@ -15,9 +21,9 @@ func applyAgentFlags(args []string, out io.Writer) error {
 	}
 	fs.SetOutput(out)
 
-	addr := fs.String("a", "", "server address (host:port or URL), default: localhost:8080")
-	report := fs.Int("r", 0, "report interval in seconds, default: 10")
-	poll := fs.Int("p", 0, "poll interval in seconds, default: 2")
+	addr := fs.String("a", "", fmt.Sprintf("server address (host:port or URL), default: %s", DefaultServerAddr))
+	report := fs.Int("r", 0, fmt.Sprintf("report interval in seconds, default: %d", DefaultReportInterval))
+	poll := fs.Int("p", 0, fmt.Sprintf("poll interval in seconds, default: %d", DefaultPollInterval))
 
 	if err := fs.Parse(args); err != nil {
 		return err
