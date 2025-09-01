@@ -45,3 +45,17 @@ func (m *MemStorage) UpdateCounter(name string, delta int64) error {
 	return nil
 }
 
+func (m *MemStorage) Snapshot() (map[string]float64, map[string]int64) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	g := make(map[string]float64, len(m.gauges))
+	for k, v := range m.gauges {
+		g[k] = v
+	}
+	c := make(map[string]int64, len(m.counters))
+	for k, v := range m.counters {
+		c[k] = v
+	}
+	return g, c
+}
