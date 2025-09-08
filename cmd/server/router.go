@@ -4,11 +4,15 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/vshulcz/Golectra/cmd/server/middlewares"
+	"go.uber.org/zap"
 )
 
-func NewRouter(h *Handler) *gin.Engine {
+func NewRouter(h *Handler, logger *zap.Logger) *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+
+	r.Use(gin.Recovery())
+	r.Use(middlewares.ZapLogger(logger))
 
 	r.RedirectTrailingSlash = false
 	r.RemoveExtraSlash = true

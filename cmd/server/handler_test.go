@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/vshulcz/Golectra/internal/store"
+	"go.uber.org/zap"
 )
 
 func TestHandler_UpdateMetric(t *testing.T) {
@@ -72,7 +73,9 @@ func TestHandler_UpdateMetric(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			st := store.NewMemStorage()
 			h := NewHandler(st)
-			router := NewRouter(h)
+
+			logger, _ := zap.NewProduction()
+			router := NewRouter(h, logger)
 
 			req := httptest.NewRequest(tt.method, tt.url, nil)
 			req.Header.Set("Content-Type", "text/plain")
@@ -108,7 +111,9 @@ func TestHandler_UpdateMetric(t *testing.T) {
 func TestHandler_GetValue_and_Index(t *testing.T) {
 	st := store.NewMemStorage()
 	h := NewHandler(st)
-	router := NewRouter(h)
+
+	logger, _ := zap.NewProduction()
+	router := NewRouter(h, logger)
 
 	{
 		req := httptest.NewRequest(http.MethodPost, "/update/gauge/g1/10.5", nil)
