@@ -24,8 +24,8 @@ func NewRuntimeAgent(cfg Config) *runtimeAgent {
 	if cfg.ReportInterval <= 0 {
 		cfg.ReportInterval = 10 * time.Second
 	}
-	if cfg.ServerURL == "" {
-		cfg.ServerURL = "http://localhost:8080"
+	if cfg.Address == "" {
+		cfg.Address = "http://localhost:8080"
 	}
 	st := newStats()
 	return &runtimeAgent{
@@ -76,7 +76,7 @@ func (a *runtimeAgent) reportOnce() {
 
 func (a *runtimeAgent) postGauge(name string, value float64) error {
 	u := fmt.Sprintf("%s/update/gauge/%s/%s",
-		a.cfg.ServerURL,
+		a.cfg.Address,
 		url.PathEscape(name),
 		strconv.FormatFloat(value, 'f', -1, 64),
 	)
@@ -85,7 +85,7 @@ func (a *runtimeAgent) postGauge(name string, value float64) error {
 
 func (a *runtimeAgent) postCounter(name string, delta int64) error {
 	u := fmt.Sprintf("%s/update/counter/%s/%s",
-		a.cfg.ServerURL,
+		a.cfg.Address,
 		url.PathEscape(name),
 		strconv.FormatInt(delta, 10),
 	)

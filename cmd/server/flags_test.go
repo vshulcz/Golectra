@@ -7,13 +7,13 @@ import (
 )
 
 func TestApplyServerFlags_SetsEnv(t *testing.T) {
-	t.Setenv("HTTP_ADDR", "")
+	t.Setenv("ADDRESS", "")
 	var out bytes.Buffer
 	if err := applyServerFlags([]string{"-a=0.0.0.0:9999"}, &out); err != nil {
 		t.Fatalf("applyServerFlags error: %v", err)
 	}
-	if got := os.Getenv("HTTP_ADDR"); got != "0.0.0.0:9999" {
-		t.Fatalf("HTTP_ADDR = %q, want %q", got, "0.0.0.0:9999")
+	if got := os.Getenv("ADDRESS"); got != "0.0.0.0:9999" {
+		t.Fatalf("ADDRESS = %q, want %q", got, "0.0.0.0:9999")
 	}
 }
 

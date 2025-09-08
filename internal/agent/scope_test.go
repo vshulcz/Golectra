@@ -11,8 +11,8 @@ import (
 func TestScope_NewRuntimeAgent_Defaults(t *testing.T) {
 	a := NewRuntimeAgent(Config{})
 
-	if a.cfg.ServerURL != "http://localhost:8080" {
-		t.Errorf("expected default ServerURL, got %s", a.cfg.ServerURL)
+	if a.cfg.Address != "http://localhost:8080" {
+		t.Errorf("expected default ServerURL, got %s", a.cfg.Address)
 	}
 	if a.cfg.PollInterval != 2*time.Second {
 		t.Errorf("expected default PollInterval=2s, got %v", a.cfg.PollInterval)
@@ -24,14 +24,14 @@ func TestScope_NewRuntimeAgent_Defaults(t *testing.T) {
 
 func TestScope_NewRuntimeAgent_KeepProvidedConfig(t *testing.T) {
 	cfg := Config{
-		ServerURL:      "http://x:1",
+		Address:        "http://x:1",
 		PollInterval:   1 * time.Second,
 		ReportInterval: 3 * time.Second,
 	}
 	a := NewRuntimeAgent(cfg)
 
-	if a.cfg.ServerURL != "http://x:1" {
-		t.Errorf("ServerURL mismatch: %s", a.cfg.ServerURL)
+	if a.cfg.Address != "http://x:1" {
+		t.Errorf("ServerURL mismatch: %s", a.cfg.Address)
 	}
 	if a.cfg.PollInterval != 1*time.Second {
 		t.Errorf("PollInterval mismatch: %v", a.cfg.PollInterval)
@@ -49,7 +49,7 @@ func TestScope_RuntimeAgent_postGaugeAndCounter(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	a := &runtimeAgent{cfg: Config{ServerURL: srv.URL}}
+	a := &runtimeAgent{cfg: Config{Address: srv.URL}}
 
 	if err := a.postGauge("Alloc", 123.4); err != nil {
 		t.Fatalf("postGauge error: %v", err)
@@ -72,7 +72,7 @@ func TestScope_RuntimeAgent_post_ErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	a := &runtimeAgent{cfg: Config{ServerURL: srv.URL}}
+	a := &runtimeAgent{cfg: Config{Address: srv.URL}}
 	err := a.postGauge("X", 1.23)
 	if err == nil || !strings.Contains(err.Error(), "400") {
 		t.Errorf("expected error about 400, got %v", err)
