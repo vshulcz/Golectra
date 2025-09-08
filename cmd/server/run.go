@@ -8,12 +8,20 @@ import (
 
 	"github.com/vshulcz/Golectra/internal/misc"
 	"github.com/vshulcz/Golectra/internal/store"
+	"go.uber.org/zap"
 )
 
 func run(listenAndServe func(addr string, handler http.Handler) error) error {
 	st := store.NewMemStorage()
 	h := NewHandler(st)
-	r := NewRouter(h)
+
+	logger, err := zap.NewProduction()
+	if err != nil {
+		return err
+	}
+	defer logger.Sync()
+
+	r := NewRouter(h, logger)
 
 	addr := misc.Getenv("ADDRESS", ":8080")
 	addr = normalizeURL(addr)
