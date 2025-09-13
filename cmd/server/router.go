@@ -26,5 +26,11 @@ func NewRouter(h *Handler, logger *zap.Logger) *gin.Engine {
 	r.GET("/value/:type/:name", h.GetMetric)
 	r.GET("/", h.Index)
 
+	// JSON endpoints
+	r.POST("/update", h.UpdateMetricJSON)
+	r.POST("/update/", h.UpdateMetricJSON)
+	r.POST("/value", h.GetMetricJSON)
+	r.POST("/value/", h.GetMetricJSON)
+
 	return r
 }

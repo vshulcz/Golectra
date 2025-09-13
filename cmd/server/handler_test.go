@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/vshulcz/Golectra/internal/store"
+	"github.com/vshulcz/Golectra/models"
 	"go.uber.org/zap"
 )
 
@@ -183,4 +187,218 @@ func TestHandler_GetValue_and_Index(t *testing.T) {
 			t.Fatalf("GET / html does not contain expected metrics; body=%q", body)
 		}
 	}
+}
+
+func TestHandler_UpdateMetricJSON(t *testing.T) {
+	srv := newTestServerJSON(t)
+	defer srv.Close()
+
+	tests := []struct {
+		name       string
+		req        models.Metrics
+		wantCode   int
+		wantCTJSON bool
+		wantField  string
+		wantNum    float64
+	}{
+		{
+			name:       "gauge ok",
+			req:        func() models.Metrics { v := 123.45; return models.Metrics{ID: "Alloc", MType: "gauge", Value: &v} }(),
+			wantCode:   http.StatusOK,
+			wantCTJSON: true,
+			wantField:  "value",
+			wantNum:    123.45,
+		},
+		{
+			name: "counter ok (first delta=3 -> total=3)",
+			req: func() models.Metrics {
+				d := int64(3)
+				return models.Metrics{ID: "PollCount", MType: "counter", Delta: &d}
+			}(),
+			wantCode:   http.StatusOK,
+			wantCTJSON: true,
+			wantField:  "delta",
+			wantNum:    3,
+		},
+		{
+			name:     "bad: missing value for gauge",
+			req:      models.Metrics{ID: "X", MType: "gauge"},
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "bad: missing delta for counter",
+			req:      models.Metrics{ID: "Y", MType: "counter"},
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "bad: empty id",
+			req:      func() models.Metrics { v := 1.0; return models.Metrics{ID: "", MType: "gauge", Value: &v} }(),
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "bad: unknown type",
+			req:      func() models.Metrics { v := 1.0; return models.Metrics{ID: "Z", MType: "weird", Value: &v} }(),
+			wantCode: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, data := doJSON(t, http.MethodPost, srv.URL+"/update", tc.req)
+			if resp.StatusCode != tc.wantCode {
+				t.Fatalf("status=%d want %d; body=%q", resp.StatusCode, tc.wantCode, string(data))
+			}
+			if tc.wantCTJSON {
+				ct := resp.Header.Get("Content-Type")
+				if !strings.HasPrefix(ct, "application/json") {
+					t.Fatalf("Content-Type=%q want application/json", ct)
+				}
+			}
+			if resp.StatusCode == http.StatusOK {
+				var got models.Metrics
+				if err := json.Unmarshal(data, &got); err != nil {
+					t.Fatalf("unmarshal: %v, body=%q", err, string(data))
+				}
+				switch tc.wantField {
+				case "value":
+					if got.Value == nil || *got.Value != tc.wantNum {
+						t.Fatalf("value=%v want %v", got.Value, tc.wantNum)
+					}
+				case "delta":
+					if got.Delta == nil || float64(*got.Delta) != tc.wantNum {
+						t.Fatalf("delta=%v want %v", got.Delta, tc.wantNum)
+					}
+				}
+			}
+		})
+	}
+
+	d := int64(4)
+	resp, data := doJSON(t, http.MethodPost, srv.URL+"/update",
+		models.Metrics{ID: "PollCount", MType: "counter", Delta: &d})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%q", resp.StatusCode, string(data))
+	}
+	var got models.Metrics
+	_ = json.Unmarshal(data, &got)
+	if got.Delta == nil || *got.Delta != 7 {
+		t.Fatalf("accumulated delta=%v want 7", got.Delta)
+	}
+}
+
+func TestHandler_GetMetricJSON(t *testing.T) {
+	srv := newTestServerJSON(t)
+	defer srv.Close()
+
+	{
+		v := 111.0
+		resp, _ := doJSON(t, http.MethodPost, srv.URL+"/update",
+			models.Metrics{ID: "LastGC", MType: "gauge", Value: &v})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("seed gauge status=%d", resp.StatusCode)
+		}
+	}
+	{
+		d := int64(5)
+		resp, _ := doJSON(t, http.MethodPost, srv.URL+"/update",
+			models.Metrics{ID: "PollCount", MType: "counter", Delta: &d})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("seed counter status=%d", resp.StatusCode)
+		}
+	}
+
+	tests := []struct {
+		name     string
+		req      models.Metrics
+		wantCode int
+		check    func(t *testing.T, data []byte)
+	}{
+		{
+			name:     "value gauge ok",
+			req:      models.Metrics{ID: "LastGC", MType: "gauge"},
+			wantCode: http.StatusOK,
+			check: func(t *testing.T, data []byte) {
+				var got models.Metrics
+				if err := json.Unmarshal(data, &got); err != nil {
+					t.Fatalf("unmarshal: %v", err)
+				}
+				if got.Value == nil || *got.Value != 111 {
+					t.Fatalf("value=%v want 111", got.Value)
+				}
+			},
+		},
+		{
+			name:     "value counter ok",
+			req:      models.Metrics{ID: "PollCount", MType: "counter"},
+			wantCode: http.StatusOK,
+			check: func(t *testing.T, data []byte) {
+				var got models.Metrics
+				_ = json.Unmarshal(data, &got)
+				if got.Delta == nil || *got.Delta != 5 {
+					t.Fatalf("delta=%v want 5", got.Delta)
+				}
+			},
+		},
+		{
+			name:     "unknown id -> 404",
+			req:      models.Metrics{ID: "Nope", MType: "gauge"},
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "bad type -> 400",
+			req:      models.Metrics{ID: "LastGC", MType: "weird"},
+			wantCode: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, data := doJSON(t, http.MethodPost, srv.URL+"/value", tc.req)
+			if resp.StatusCode != tc.wantCode {
+				t.Fatalf("status=%d want %d; body=%q", resp.StatusCode, tc.wantCode, string(data))
+			}
+			if resp.StatusCode == http.StatusOK {
+				ct := resp.Header.Get("Content-Type")
+				if !strings.HasPrefix(ct, "application/json") {
+					t.Fatalf("Content-Type=%q want application/json", ct)
+				}
+				if tc.check != nil {
+					tc.check(t, data)
+				}
+			}
+		})
+	}
+}
+
+func newTestServerJSON(t *testing.T) *httptest.Server {
+	t.Helper()
+	st := store.NewMemStorage()
+	h := NewHandler(st)
+	r := NewRouter(h, zap.NewNop())
+	return httptest.NewServer(r)
+}
+
+func doJSON(t *testing.T, method, url string, payload any) (*http.Response, []byte) {
+	t.Helper()
+	var body io.Reader
+	if payload != nil {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	data, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	return resp, data
 }
