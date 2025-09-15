@@ -402,3 +402,92 @@ func doJSON(t *testing.T, method, url string, payload any) (*http.Response, []by
 	_ = resp.Body.Close()
 	return resp, data
 }
+
+func TestHandler_AfterUpdateCalled(t *testing.T) {
+	st := store.NewMemStorage()
+	h := NewHandler(st)
+
+	called := false
+	h.SetAfterUpdate(func() { called = true })
+
+	req := httptest.NewRequest(http.MethodPost, "/update/gauge/x/1.23", nil)
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+
+	r := NewRouter(h, zap.NewNop())
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rec.Code)
+	}
+	if !called {
+		t.Fatalf("afterUpdate should have been called")
+	}
+
+	called = false
+	v := 5.5
+	reqJSON, _ := json.Marshal(models.Metrics{ID: "y", MType: "gauge", Value: &v})
+	req = httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(reqJSON))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", rec.Code)
+	}
+	if !called {
+		t.Fatalf("afterUpdate should have been called for JSON")
+	}
+}
+
+func TestHandler_UpdateMetricJSON_BadPayloads(t *testing.T) {
+	st := store.NewMemStorage()
+	h := NewHandler(st)
+	r := NewRouter(h, zap.NewNop())
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"empty body", ""},
+		{"invalid json", "{"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/update", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d, want 400", rec.Code)
+			}
+		})
+	}
+}
+
+func TestHandler_GetMetricJSON_BadPayloads(t *testing.T) {
+	st := store.NewMemStorage()
+	h := NewHandler(st)
+	r := NewRouter(h, zap.NewNop())
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"empty body", ""},
+		{"invalid json", "{"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/value", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d, want 400", rec.Code)
+			}
+		})
+	}
+}

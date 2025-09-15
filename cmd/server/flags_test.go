@@ -1,25 +1,58 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"testing"
 )
 
-func TestApplyServerFlags_SetsEnv(t *testing.T) {
-	t.Setenv("ADDRESS", "")
-	var out bytes.Buffer
-	if err := applyServerFlags([]string{"-a=0.0.0.0:9999"}, &out); err != nil {
-		t.Fatalf("applyServerFlags error: %v", err)
+func TestFlags_applyServerFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     map[string]string
+		args    []string
+		check   func(t *testing.T)
+		wantErr bool
+	}{
+		{
+			name: "sets address",
+			args: []string{"-a=0.0.0.0:9999"},
+			check: func(t *testing.T) {
+				if os.Getenv("ADDRESS") != "0.0.0.0:9999" {
+					t.Errorf("ADDRESS not set")
+				}
+			},
+		},
+		{
+			name:    "unknown flag",
+			args:    []string{"-z"},
+			wantErr: true,
+		},
+		{
+			name: "env override",
+			env: map[string]string{
+				"ADDRESS": "from-env",
+			},
+			args: []string{"-a=127.0.0.1:9999"},
+			check: func(t *testing.T) {
+				if os.Getenv("ADDRESS") != "from-env" {
+					t.Errorf("ADDRESS override failed")
+				}
+			},
+		},
 	}
-	if got := os.Getenv("ADDRESS"); got != "0.0.0.0:9999" {
-		t.Fatalf("ADDRESS = %q, want %q", got, "0.0.0.0:9999")
-	}
-}
 
-func TestApplyServerFlags_UnknownFlag(t *testing.T) {
-	var out bytes.Buffer
-	if err := applyServerFlags([]string{"-z"}, &out); err == nil {
-		t.Fatalf("expected error for unknown flag, got nil")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			err := applyServerFlags(tt.args, nil)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err=%v, wantErr=%v", err, tt.wantErr)
+			}
+			if tt.check != nil {
+				tt.check(t)
+			}
+		})
 	}
 }
