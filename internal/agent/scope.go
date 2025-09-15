@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -124,24 +125,46 @@ func (a *runtimeAgent) post(urlStr string) error {
 }
 
 func (a *runtimeAgent) postJSON(endpoint string, m models.Metrics) error {
-	body, err := json.Marshal(m)
+	raw, err := json.Marshal(m)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	var gzBuf bytes.Buffer
+	gzw := gzip.NewWriter(&gzBuf)
+	if _, err := gzw.Write(raw); err != nil {
+		_ = gzw.Close()
+		return err
+	}
+	if err := gzw.Close(); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(gzBuf.Bytes()))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, resp.Body)
+
+	var body io.Reader = resp.Body
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Encoding")), "gzip") {
+		gr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return fmt.Errorf("bad gzip response: %w", err)
+		}
+		defer gr.Close()
+		body = gr
+	}
+	io.Copy(io.Discard, body)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server status: %s", resp.Status)
