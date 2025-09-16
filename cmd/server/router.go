@@ -14,6 +14,9 @@ func NewRouter(h *Handler, logger *zap.Logger) *gin.Engine {
 	r.Use(gin.Recovery())
 	r.Use(middlewares.ZapLogger(logger))
 
+	r.Use(middlewares.GunzipRequest())
+	r.Use(middlewares.GzipResponse())
+
 	r.RedirectTrailingSlash = false
 	r.RemoveExtraSlash = true
 

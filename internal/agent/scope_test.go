@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -109,6 +110,8 @@ func TestScope_postJSON(t *testing.T) {
 	type seen struct {
 		ct   string
 		acc  string
+		ae   string
+		ce   string
 		body models.Metrics
 	}
 	var got seen
@@ -116,9 +119,23 @@ func TestScope_postJSON(t *testing.T) {
 	srvOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got.ct = r.Header.Get("Content-Type")
 		got.acc = r.Header.Get("Accept")
+		got.ae = r.Header.Get("Accept-Encoding")
+		got.ce = r.Header.Get("Content-Encoding")
+
 		defer r.Body.Close()
-		b, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(b, &got.body)
+		var reader io.Reader = r.Body
+		if strings.Contains(strings.ToLower(got.ce), "gzip") {
+			gr, err := gzip.NewReader(r.Body)
+			if err != nil {
+				http.Error(w, "bad gzip", http.StatusBadRequest)
+				return
+			}
+			defer gr.Close()
+			reader = gr
+		}
+		b, _ := io.ReadAll(reader)
+		json.Unmarshal(b, &got.body)
+
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srvOK.Close()
@@ -136,6 +153,12 @@ func TestScope_postJSON(t *testing.T) {
 		}
 		if got.acc != "application/json" {
 			t.Fatalf("Accept=%q want application/json", got.acc)
+		}
+		if !strings.Contains(strings.ToLower(got.ae), "gzip") {
+			t.Fatalf("Accept-Encoding=%q want to contain gzip", got.ae)
+		}
+		if strings.ToLower(got.ce) != "gzip" {
+			t.Fatalf("Content-Encoding=%q want gzip", got.ce)
 		}
 		if got.body.ID != "Alloc" || got.body.MType != "gauge" || got.body.Value == nil {
 			t.Fatalf("bad body: %+v", got.body)
@@ -175,11 +198,23 @@ func TestScope_reportOnce_SendsAllMetrics(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPaths = append(gotPaths, r.URL.Path)
 		gotCT = append(gotCT, r.Header.Get("Content-Type"))
+
 		defer r.Body.Close()
-		b, _ := io.ReadAll(r.Body)
+		var reader io.Reader = r.Body
+		if strings.Contains(strings.ToLower(r.Header.Get("Content-Encoding")), "gzip") {
+			gr, err := gzip.NewReader(r.Body)
+			if err != nil {
+				http.Error(w, "bad gzip", http.StatusBadRequest)
+				return
+			}
+			defer gr.Close()
+			reader = gr
+		}
+		b, _ := io.ReadAll(reader)
 		var m models.Metrics
-		_ = json.Unmarshal(b, &m)
+		json.Unmarshal(b, &m)
 		gotMsgs = append(gotMsgs, m)
+
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
