@@ -3,17 +3,31 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 
-	"github.com/vshulcz/Golectra/internal/misc"
-	"github.com/vshulcz/Golectra/internal/store"
+	"github.com/vshulcz/Golectra/internal/config"
+	"go.uber.org/zap"
 )
 
 func run(listenAndServe func(addr string, handler http.Handler) error) error {
-	st := store.NewMemStorage()
-	h := NewHandler(st)
-	r := NewRouter(h)
+	cfg, err := config.LoadServerConfig(os.Args[1:], nil)
+	if err != nil {
+		log.Fatalf("failed to parse flags: %v", err)
+	}
 
-	addr := misc.Getenv("HTTP_ADDR", "localhost:8080")
-	log.Printf("Starting server at http://%s", addr)
-	return listenAndServe(addr, r)
+	st := initStorage(cfg)
+	h := NewHandler(st)
+	initPersistence(st, h, cfg)
+
+	logger, err := zap.NewProduction()
+	if err != nil {
+		return err
+	}
+	defer logger.Sync()
+
+	r := NewRouter(h, logger)
+
+	log.Printf("Starting server at %s (file=%s, interval=%v, restore=%v)",
+		cfg.Address, cfg.File, cfg.Interval, cfg.Restore)
+	return listenAndServe(cfg.Address, r)
 }

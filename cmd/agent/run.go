@@ -2,25 +2,21 @@ package main
 
 import (
 	"log"
-	"time"
+	"os"
 
 	"github.com/vshulcz/Golectra/internal/agent"
-	"github.com/vshulcz/Golectra/internal/misc"
+	"github.com/vshulcz/Golectra/internal/config"
 )
 
-func run(newAgent func(agent.Config) interface {
-	Start()
-	Stop()
-}) {
-	cfg := agent.Config{
-		ServerURL:      misc.Getenv("SERVER_URL", DefaultServerAddr),
-		PollInterval:   misc.GetDuration("POLL_INTERVAL", DefaultPollInterval*time.Second),
-		ReportInterval: misc.GetDuration("REPORT_INTERVAL", DefaultReportInterval*time.Second),
+func run(newAgent func(config.AgentConfig) agent.Agent) {
+	cfg, err := config.LoadAgentConfig(os.Args[1:], nil)
+	if err != nil {
+		log.Fatalf("failed to parse flags: %v", err)
 	}
 
 	a := newAgent(cfg)
 	log.Printf("agent started: server=%s poll=%s report=%s",
-		cfg.ServerURL, cfg.PollInterval, cfg.ReportInterval)
+		cfg.Address, cfg.PollInterval, cfg.ReportInterval)
 
 	a.Start()
 }

@@ -1,31 +1,38 @@
 package agent
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/vshulcz/Golectra/internal/config"
+	"github.com/vshulcz/Golectra/models"
 )
 
 type runtimeAgent struct {
-	cfg    Config
+	cfg    config.AgentConfig
 	stats  *stats
 	poller *poller
 	stop   chan struct{}
 }
 
-func NewRuntimeAgent(cfg Config) *runtimeAgent {
+func NewRuntimeAgent(cfg config.AgentConfig) Agent {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 2 * time.Second
 	}
 	if cfg.ReportInterval <= 0 {
 		cfg.ReportInterval = 10 * time.Second
 	}
-	if cfg.ServerURL == "" {
-		cfg.ServerURL = "http://localhost:8080"
+	if cfg.Address == "" {
+		cfg.Address = "http://localhost:8080"
 	}
 	st := newStats()
 	return &runtimeAgent{
@@ -59,16 +66,21 @@ func (a *runtimeAgent) Stop() {
 
 func (a *runtimeAgent) reportOnce() {
 	g, c := a.stats.snapshot()
+	endpoint := mustJoinURL(a.cfg.Address, "/update/")
 
 	log.Printf("agent: reporting %d gauges, %d counters", len(g), len(c))
 
 	for name, val := range g {
-		if err := a.postGauge(name, val); err != nil {
+		v := val
+		msg := models.Metrics{ID: name, MType: string(models.Gauge), Value: &v}
+		if err := a.postJSON(endpoint, msg); err != nil {
 			log.Printf("agent: post gauge %s err: %v", name, err)
 		}
 	}
-	for name, val := range c {
-		if err := a.postCounter(name, val); err != nil {
+	for name, delta := range c {
+		d := delta
+		msg := models.Metrics{ID: name, MType: string(models.Counter), Delta: &d}
+		if err := a.postJSON(endpoint, msg); err != nil {
 			log.Printf("agent: post counter %s err: %v", name, err)
 		}
 	}
@@ -76,7 +88,7 @@ func (a *runtimeAgent) reportOnce() {
 
 func (a *runtimeAgent) postGauge(name string, value float64) error {
 	u := fmt.Sprintf("%s/update/gauge/%s/%s",
-		a.cfg.ServerURL,
+		a.cfg.Address,
 		url.PathEscape(name),
 		strconv.FormatFloat(value, 'f', -1, 64),
 	)
@@ -85,7 +97,7 @@ func (a *runtimeAgent) postGauge(name string, value float64) error {
 
 func (a *runtimeAgent) postCounter(name string, delta int64) error {
 	u := fmt.Sprintf("%s/update/counter/%s/%s",
-		a.cfg.ServerURL,
+		a.cfg.Address,
 		url.PathEscape(name),
 		strconv.FormatInt(delta, 10),
 	)
@@ -111,4 +123,61 @@ func (a *runtimeAgent) post(urlStr string) error {
 	}
 	log.Printf("agent: posted %s -> %s", req.Method, urlStr)
 	return nil
+}
+
+func (a *runtimeAgent) postJSON(endpoint string, m models.Metrics) error {
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+
+	var gzBuf bytes.Buffer
+	gzw := gzip.NewWriter(&gzBuf)
+	if _, err := gzw.Write(raw); err != nil {
+		_ = gzw.Close()
+		return err
+	}
+	if err := gzw.Close(); err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(gzBuf.Bytes()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var body io.Reader = resp.Body
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Encoding")), "gzip") {
+		gr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return fmt.Errorf("bad gzip response: %w", err)
+		}
+		defer gr.Close()
+		body = gr
+	}
+	io.Copy(io.Discard, body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server status: %s", resp.Status)
+	}
+	return nil
+}
+
+func mustJoinURL(base, path string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return base + path
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + path
+	return u.String()
 }
