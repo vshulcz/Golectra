@@ -13,17 +13,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vshulcz/Golectra/internal/config"
 	"github.com/vshulcz/Golectra/models"
 )
 
 type runtimeAgent struct {
-	cfg    Config
+	cfg    config.AgentConfig
 	stats  *stats
 	poller *poller
 	stop   chan struct{}
 }
 
-func NewRuntimeAgent(cfg Config) *runtimeAgent {
+func NewRuntimeAgent(cfg config.AgentConfig) Agent {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 2 * time.Second
 	}

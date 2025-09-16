@@ -3,17 +3,21 @@ package main
 import (
 	"log"
 	"net/http"
-	"net/url"
-	"strings"
+	"os"
 
-	"github.com/vshulcz/Golectra/internal/misc"
-	"github.com/vshulcz/Golectra/internal/store"
+	"github.com/vshulcz/Golectra/internal/config"
 	"go.uber.org/zap"
 )
 
 func run(listenAndServe func(addr string, handler http.Handler) error) error {
-	st := store.NewMemStorage()
+	cfg, err := config.LoadServerConfig(os.Args[1:], nil)
+	if err != nil {
+		log.Fatalf("failed to parse flags: %v", err)
+	}
+
+	st := initStorage(cfg)
 	h := NewHandler(st)
+	initPersistence(st, h, cfg)
 
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -23,24 +27,7 @@ func run(listenAndServe func(addr string, handler http.Handler) error) error {
 
 	r := NewRouter(h, logger)
 
-	addr := misc.Getenv("ADDRESS", ":8080")
-	addr = normalizeURL(addr)
-	log.Printf("Starting server at %s", addr)
-	return listenAndServe(addr, r)
-}
-
-func normalizeURL(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ":8080"
-	}
-	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
-		if u, err := url.Parse(s); err == nil && u.Host != "" {
-			return u.Host
-		}
-	}
-	if !strings.Contains(s, ":") {
-		return ":" + s
-	}
-	return s
+	log.Printf("Starting server at %s (file=%s, interval=%v, restore=%v)",
+		cfg.Address, cfg.File, cfg.Interval, cfg.Restore)
+	return listenAndServe(cfg.Address, r)
 }

@@ -2,22 +2,16 @@ package main
 
 import (
 	"log"
-	"strings"
-	"time"
+	"os"
 
 	"github.com/vshulcz/Golectra/internal/agent"
-	"github.com/vshulcz/Golectra/internal/misc"
+	"github.com/vshulcz/Golectra/internal/config"
 )
 
-func run(newAgent func(agent.Config) interface {
-	Start()
-	Stop()
-}) {
-	addr := misc.Getenv("ADDRESS", DefaultServerAddr)
-	cfg := agent.Config{
-		Address:        normalizeURL(addr),
-		PollInterval:   misc.GetDuration("POLL_INTERVAL", DefaultPollInterval*time.Second),
-		ReportInterval: misc.GetDuration("REPORT_INTERVAL", DefaultReportInterval*time.Second),
+func run(newAgent func(config.AgentConfig) agent.Agent) {
+	cfg, err := config.LoadAgentConfig(os.Args[1:], nil)
+	if err != nil {
+		log.Fatalf("failed to parse flags: %v", err)
 	}
 
 	a := newAgent(cfg)
@@ -25,18 +19,4 @@ func run(newAgent func(agent.Config) interface {
 		cfg.Address, cfg.PollInterval, cfg.ReportInterval)
 
 	a.Start()
-}
-
-func normalizeURL(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "http://localhost:8080"
-	}
-	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
-		return s
-	}
-	if strings.HasPrefix(s, ":") {
-		return "http://localhost" + s
-	}
-	return "http://" + s
 }

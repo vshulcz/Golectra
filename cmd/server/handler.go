@@ -11,11 +11,16 @@ import (
 )
 
 type Handler struct {
-	storage store.Storage
+	storage     store.Storage
+	afterUpdate func()
 }
 
 func NewHandler(s store.Storage) *Handler {
 	return &Handler{storage: s}
+}
+
+func (h *Handler) SetAfterUpdate(fn func()) {
+	h.afterUpdate = fn
 }
 
 // POST /update/:type/:name/:value
@@ -35,6 +40,9 @@ func (h *Handler) UpdateMetric(c *gin.Context) {
 			return
 		}
 		h.storage.UpdateGauge(metricName, val)
+		if h.afterUpdate != nil {
+			h.afterUpdate()
+		}
 
 	case string(models.Counter):
 		val, err := strconv.ParseInt(metricValue, 10, 64)
@@ -43,6 +51,9 @@ func (h *Handler) UpdateMetric(c *gin.Context) {
 			return
 		}
 		h.storage.UpdateCounter(metricName, val)
+		if h.afterUpdate != nil {
+			h.afterUpdate()
+		}
 
 	default:
 		c.String(http.StatusBadRequest, "bad request")
@@ -125,6 +136,9 @@ func (h *Handler) UpdateMetricJSON(c *gin.Context) {
 			return
 		}
 		_ = h.storage.UpdateGauge(m.ID, *m.Value)
+		if h.afterUpdate != nil {
+			h.afterUpdate()
+		}
 		if v, ok := h.storage.GetGauge(m.ID); ok {
 			resp := models.Metrics{ID: m.ID, MType: m.MType, Value: &v}
 			c.JSON(http.StatusOK, resp)
@@ -138,6 +152,9 @@ func (h *Handler) UpdateMetricJSON(c *gin.Context) {
 			return
 		}
 		_ = h.storage.UpdateCounter(m.ID, *m.Delta)
+		if h.afterUpdate != nil {
+			h.afterUpdate()
+		}
 		if v, ok := h.storage.GetCounter(m.ID); ok {
 			resp := models.Metrics{ID: m.ID, MType: m.MType, Delta: &v}
 			c.JSON(http.StatusOK, resp)
