@@ -1,13 +1,18 @@
 package agent
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/vshulcz/Golectra/models"
 )
 
 type runtimeAgent struct {
@@ -59,16 +64,21 @@ func (a *runtimeAgent) Stop() {
 
 func (a *runtimeAgent) reportOnce() {
 	g, c := a.stats.snapshot()
+	endpoint := mustJoinURL(a.cfg.Address, "/update/")
 
 	log.Printf("agent: reporting %d gauges, %d counters", len(g), len(c))
 
 	for name, val := range g {
-		if err := a.postGauge(name, val); err != nil {
+		v := val
+		msg := models.Metrics{ID: name, MType: string(models.Gauge), Value: &v}
+		if err := a.postJSON(endpoint, msg); err != nil {
 			log.Printf("agent: post gauge %s err: %v", name, err)
 		}
 	}
-	for name, val := range c {
-		if err := a.postCounter(name, val); err != nil {
+	for name, delta := range c {
+		d := delta
+		msg := models.Metrics{ID: name, MType: string(models.Counter), Delta: &d}
+		if err := a.postJSON(endpoint, msg); err != nil {
 			log.Printf("agent: post counter %s err: %v", name, err)
 		}
 	}
@@ -111,4 +121,39 @@ func (a *runtimeAgent) post(urlStr string) error {
 	}
 	log.Printf("agent: posted %s -> %s", req.Method, urlStr)
 	return nil
+}
+
+func (a *runtimeAgent) postJSON(endpoint string, m models.Metrics) error {
+	body, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server status: %s", resp.Status)
+	}
+	return nil
+}
+
+func mustJoinURL(base, path string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return base + path
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + path
+	return u.String()
 }

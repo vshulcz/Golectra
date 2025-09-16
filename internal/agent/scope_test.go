@@ -1,11 +1,15 @@
 package agent
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vshulcz/Golectra/models"
 )
 
 func TestScope_NewRuntimeAgent_Defaults(t *testing.T) {
@@ -76,5 +80,148 @@ func TestScope_RuntimeAgent_post_ErrorStatus(t *testing.T) {
 	err := a.postGauge("X", 1.23)
 	if err == nil || !strings.Contains(err.Error(), "400") {
 		t.Errorf("expected error about 400, got %v", err)
+	}
+}
+
+func TestScope_mustJoinURL(t *testing.T) {
+	tests := []struct {
+		name string
+		base string
+		path string
+		want string
+	}{
+		{"no-trailing-slash", "http://h:1", "/update/", "http://h:1/update/"},
+		{"with-trailing-slash", "http://h:1/", "/update/", "http://h:1/update/"},
+		{"with-base-path", "http://h:1/api", "/update/", "http://h:1/api/update/"},
+		{"with-base-path-trailing", "http://h:1/api/", "/update/", "http://h:1/api/update/"},
+		{"invalid-base", "%%%", "/update/", "%%%/update/"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mustJoinURL(tc.base, tc.path); got != tc.want {
+				t.Fatalf("mustJoinURL(%q,%q)=%q want %q", tc.base, tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestScope_postJSON(t *testing.T) {
+	type seen struct {
+		ct   string
+		acc  string
+		body models.Metrics
+	}
+	var got seen
+
+	srvOK := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.ct = r.Header.Get("Content-Type")
+		got.acc = r.Header.Get("Accept")
+		defer r.Body.Close()
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &got.body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srvOK.Close()
+
+	agt := &runtimeAgent{cfg: Config{Address: srvOK.URL}}
+
+	t.Run("gauge", func(t *testing.T) {
+		v := 123.45
+		msg := models.Metrics{ID: "Alloc", MType: string(models.Gauge), Value: &v}
+		if err := agt.postJSON(srvOK.URL, msg); err != nil {
+			t.Fatalf("postJSON gauge err: %v", err)
+		}
+		if got.ct != "application/json" {
+			t.Fatalf("Content-Type=%q want application/json", got.ct)
+		}
+		if got.acc != "application/json" {
+			t.Fatalf("Accept=%q want application/json", got.acc)
+		}
+		if got.body.ID != "Alloc" || got.body.MType != "gauge" || got.body.Value == nil {
+			t.Fatalf("bad body: %+v", got.body)
+		}
+	})
+
+	t.Run("counter", func(t *testing.T) {
+		d := int64(7)
+		msg := models.Metrics{ID: "PollCount", MType: string(models.Counter), Delta: &d}
+		if err := agt.postJSON(srvOK.URL, msg); err != nil {
+			t.Fatalf("postJSON counter err: %v", err)
+		}
+		if got.body.ID != "PollCount" || got.body.MType != "counter" || got.body.Delta == nil || *got.body.Delta != 7 {
+			t.Fatalf("bad body: %+v", got.body)
+		}
+	})
+
+	t.Run("non-200 returns error", func(t *testing.T) {
+		srvBad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "bad", http.StatusBadRequest)
+		}))
+		defer srvBad.Close()
+		v := 1.0
+		err := agt.postJSON(srvBad.URL, models.Metrics{ID: "X", MType: "gauge", Value: &v})
+		if err == nil || !strings.Contains(err.Error(), "400") {
+			t.Fatalf("want error with 400, got %v", err)
+		}
+	})
+}
+
+func TestScope_reportOnce_SendsAllMetrics(t *testing.T) {
+	var (
+		gotPaths []string
+		gotCT    []string
+		gotMsgs  []models.Metrics
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		gotCT = append(gotCT, r.Header.Get("Content-Type"))
+		defer r.Body.Close()
+		b, _ := io.ReadAll(r.Body)
+		var m models.Metrics
+		_ = json.Unmarshal(b, &m)
+		gotMsgs = append(gotMsgs, m)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	st := newStats()
+	st.setGauge("Alloc", 1.23)
+	st.addCounter("PollCount", 3)
+	agt := &runtimeAgent{
+		cfg:   Config{Address: srv.URL},
+		stats: st,
+	}
+
+	agt.reportOnce()
+
+	if len(gotMsgs) != 2 {
+		t.Fatalf("sent %d messages, want 2", len(gotMsgs))
+	}
+	for _, p := range gotPaths {
+		if p != "/update/" {
+			t.Fatalf("path=%q want /update/", p)
+		}
+	}
+	if gotCT[0] != "application/json" || gotCT[1] != "application/json" {
+		t.Fatalf("content-types=%v want application/json", gotCT)
+	}
+
+	var haveAlloc, havePoll bool
+	for _, m := range gotMsgs {
+		switch m.ID {
+		case "Alloc":
+			if m.MType != "gauge" || m.Value == nil {
+				t.Fatalf("bad gauge: %+v", m)
+			}
+			haveAlloc = true
+		case "PollCount":
+			if m.MType != "counter" || m.Delta == nil || *m.Delta != 3 {
+				t.Fatalf("bad counter: %+v", m)
+			}
+			havePoll = true
+		}
+	}
+	if !haveAlloc || !havePoll {
+		t.Fatalf("missing metrics: alloc=%v poll=%v", haveAlloc, havePoll)
 	}
 }

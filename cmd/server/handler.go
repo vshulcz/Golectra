@@ -109,3 +109,73 @@ func (h *Handler) Index(c *gin.Context) {
 
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(sb.String()))
 }
+
+// POST /update  (application/json)
+func (h *Handler) UpdateMetricJSON(c *gin.Context) {
+	var m models.Metrics
+	if err := c.ShouldBindJSON(&m); err != nil || strings.TrimSpace(m.ID) == "" {
+		c.String(http.StatusBadRequest, "bad request")
+		return
+	}
+
+	switch m.MType {
+	case string(models.Gauge):
+		if m.Value == nil {
+			c.String(http.StatusBadRequest, "bad request")
+			return
+		}
+		_ = h.storage.UpdateGauge(m.ID, *m.Value)
+		if v, ok := h.storage.GetGauge(m.ID); ok {
+			resp := models.Metrics{ID: m.ID, MType: m.MType, Value: &v}
+			c.JSON(http.StatusOK, resp)
+			return
+		}
+		c.String(http.StatusNotFound, "not found")
+
+	case string(models.Counter):
+		if m.Delta == nil {
+			c.String(http.StatusBadRequest, "bad request")
+			return
+		}
+		_ = h.storage.UpdateCounter(m.ID, *m.Delta)
+		if v, ok := h.storage.GetCounter(m.ID); ok {
+			resp := models.Metrics{ID: m.ID, MType: m.MType, Delta: &v}
+			c.JSON(http.StatusOK, resp)
+			return
+		}
+		c.String(http.StatusNotFound, "not found")
+
+	default:
+		c.String(http.StatusBadRequest, "bad request")
+	}
+}
+
+// POST /value  (application/json)
+func (h *Handler) GetMetricJSON(c *gin.Context) {
+	var q models.Metrics
+	if err := c.ShouldBindJSON(&q); err != nil || strings.TrimSpace(q.ID) == "" {
+		c.String(http.StatusBadRequest, "bad request")
+		return
+	}
+
+	switch q.MType {
+	case string(models.Gauge):
+		if v, ok := h.storage.GetGauge(q.ID); ok {
+			resp := models.Metrics{ID: q.ID, MType: q.MType, Value: &v}
+			c.JSON(http.StatusOK, resp)
+			return
+		}
+		c.String(http.StatusNotFound, "not found")
+
+	case string(models.Counter):
+		if v, ok := h.storage.GetCounter(q.ID); ok {
+			resp := models.Metrics{ID: q.ID, MType: q.MType, Delta: &v}
+			c.JSON(http.StatusOK, resp)
+			return
+		}
+		c.String(http.StatusNotFound, "not found")
+
+	default:
+		c.String(http.StatusBadRequest, "bad request")
+	}
+}
