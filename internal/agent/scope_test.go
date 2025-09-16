@@ -10,11 +10,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vshulcz/Golectra/internal/config"
 	"github.com/vshulcz/Golectra/models"
 )
 
 func TestScope_NewRuntimeAgent_Defaults(t *testing.T) {
-	a := NewRuntimeAgent(Config{})
+	ag := NewRuntimeAgent(config.AgentConfig{})
+
+	a, ok := ag.(*runtimeAgent)
+	if !ok {
+		t.Fatalf("NewRuntimeAgent returned %T; want *runtimeAgent", ag)
+	}
 
 	if a.cfg.Address != "http://localhost:8080" {
 		t.Errorf("expected default ServerURL, got %s", a.cfg.Address)
@@ -28,12 +34,18 @@ func TestScope_NewRuntimeAgent_Defaults(t *testing.T) {
 }
 
 func TestScope_NewRuntimeAgent_KeepProvidedConfig(t *testing.T) {
-	cfg := Config{
+	cfg := config.AgentConfig{
 		Address:        "http://x:1",
 		PollInterval:   1 * time.Second,
 		ReportInterval: 3 * time.Second,
 	}
-	a := NewRuntimeAgent(cfg)
+
+	ag := NewRuntimeAgent(cfg)
+
+	a, ok := ag.(*runtimeAgent)
+	if !ok {
+		t.Fatalf("NewRuntimeAgent returned %T; want *runtimeAgent", ag)
+	}
 
 	if a.cfg.Address != "http://x:1" {
 		t.Errorf("ServerURL mismatch: %s", a.cfg.Address)
@@ -54,7 +66,7 @@ func TestScope_RuntimeAgent_postGaugeAndCounter(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	a := &runtimeAgent{cfg: Config{Address: srv.URL}}
+	a := &runtimeAgent{cfg: config.AgentConfig{Address: srv.URL}}
 
 	if err := a.postGauge("Alloc", 123.4); err != nil {
 		t.Fatalf("postGauge error: %v", err)
@@ -77,7 +89,7 @@ func TestScope_RuntimeAgent_post_ErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	a := &runtimeAgent{cfg: Config{Address: srv.URL}}
+	a := &runtimeAgent{cfg: config.AgentConfig{Address: srv.URL}}
 	err := a.postGauge("X", 1.23)
 	if err == nil || !strings.Contains(err.Error(), "400") {
 		t.Errorf("expected error about 400, got %v", err)
@@ -140,7 +152,7 @@ func TestScope_postJSON(t *testing.T) {
 	}))
 	defer srvOK.Close()
 
-	agt := &runtimeAgent{cfg: Config{Address: srvOK.URL}}
+	agt := &runtimeAgent{cfg: config.AgentConfig{Address: srvOK.URL}}
 
 	t.Run("gauge", func(t *testing.T) {
 		v := 123.45
@@ -223,7 +235,7 @@ func TestScope_reportOnce_SendsAllMetrics(t *testing.T) {
 	st.setGauge("Alloc", 1.23)
 	st.addCounter("PollCount", 3)
 	agt := &runtimeAgent{
-		cfg:   Config{Address: srv.URL},
+		cfg:   config.AgentConfig{Address: srv.URL},
 		stats: st,
 	}
 
