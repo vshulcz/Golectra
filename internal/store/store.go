@@ -7,4 +7,5 @@ type Storage interface {
 	UpdateCounter(name string, delta int64) error
 
 	Snapshot() (map[string]float64, map[string]int64)
+	Ping() error
 }
