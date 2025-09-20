@@ -27,7 +27,7 @@ func run(listenAndServe func(addr string, handler http.Handler) error) error {
 
 	r := NewRouter(h, logger)
 
-	log.Printf("Starting server at %s (file=%s, interval=%v, restore=%v)",
-		cfg.Address, cfg.File, cfg.Interval, cfg.Restore)
+	log.Printf("cfg: addr=%s file=%s interval=%v restore=%v dsn=%q",
+		cfg.Address, cfg.File, cfg.Interval, cfg.Restore, cfg.DSN)
 	return listenAndServe(cfg.Address, r)
 }

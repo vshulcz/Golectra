@@ -14,14 +14,16 @@ import (
 
 const (
 	defaultListenAndServeAddr = ":8080"
-	defaultStoreInterval      = 300
 	defaultFilePath           = "metrics-db.json"
+	defaultDSN                = ""
+	defaultStoreInterval      = 300
 	defaultRestore            = false
 )
 
 type ServerConfig struct {
 	Address  string
 	File     string
+	DSN      string
 	Interval time.Duration
 	Restore  bool
 }
@@ -36,13 +38,15 @@ func LoadServerConfig(args []string, out io.Writer) (ServerConfig, error) {
 	fs.SetOutput(out)
 
 	var addrOpt string
-	var ivalOpt int
 	var fileOpt string
+	var dsnOpt string
+	var ivalOpt int
 	var restoreOpt bool
 
 	fs.StringVar(&addrOpt, "a", "", fmt.Sprintf("HTTP listen address, default: %s", defaultListenAndServeAddr))
-	fs.IntVar(&ivalOpt, "i", -1, fmt.Sprintf("STORE_INTERVAL seconds (0 - sync), default: %d", defaultStoreInterval))
 	fs.StringVar(&fileOpt, "f", "", fmt.Sprintf("FILE_STORAGE_PATH, default: %s", defaultFilePath))
+	fs.StringVar(&dsnOpt, "d", "", fmt.Sprintf("DATABASE_DSN for Postgres, default: %s", defaultDSN))
+	fs.IntVar(&ivalOpt, "i", -1, fmt.Sprintf("STORE_INTERVAL seconds (0 - sync), default: %d", defaultStoreInterval))
 	fs.BoolVar(&restoreOpt, "r", false, fmt.Sprintf("RESTORE on start (true/false), default: %t", defaultRestore))
 
 	if err := fs.Parse(args); err != nil {
@@ -60,16 +64,21 @@ func LoadServerConfig(args []string, out io.Writer) (ServerConfig, error) {
 		return ServerConfig{}, fmt.Errorf("invalid listen address: %q", addr)
 	}
 
+	file := fileOpt
+	if strings.TrimSpace(file) == "" {
+		file = misc.Getenv("FILE_STORAGE_PATH", defaultFilePath)
+	}
+
+	dsn := misc.Getenv("DATABASE_DSN", defaultDSN)
+	if dsn == "" {
+		dsn = strings.TrimSpace(dsnOpt)
+	}
+
 	var interval time.Duration
 	if ivalOpt >= 0 {
 		interval = time.Duration(ivalOpt) * time.Second
 	} else {
 		interval = misc.GetDuration("STORE_INTERVAL", time.Duration(defaultStoreInterval)*time.Second)
-	}
-
-	file := fileOpt
-	if strings.TrimSpace(file) == "" {
-		file = misc.Getenv("FILE_STORAGE_PATH", defaultFilePath)
 	}
 
 	restore := restoreOpt
@@ -80,6 +89,7 @@ func LoadServerConfig(args []string, out io.Writer) (ServerConfig, error) {
 	return ServerConfig{
 		Address:  addr,
 		File:     file,
+		DSN:      dsn,
 		Interval: interval,
 		Restore:  restore,
 	}, nil

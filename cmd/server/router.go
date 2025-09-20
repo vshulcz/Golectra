@@ -25,6 +25,8 @@ func NewRouter(h *Handler, logger *zap.Logger) *gin.Engine {
 		c.String(http.StatusMethodNotAllowed, "method not allowed")
 	})
 
+	r.GET("/ping", h.PingDB)
+
 	r.POST("/update/:type/:name/:value", h.UpdateMetric)
 	r.GET("/value/:type/:name", h.GetMetric)
 	r.GET("/", h.Index)

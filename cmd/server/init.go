@@ -1,23 +1,37 @@
 package main
 
 import (
+	"database/sql"
 	"log"
 	"time"
+
+	_ "github.com/lib/pq"
 
 	"github.com/vshulcz/Golectra/internal/config"
 	"github.com/vshulcz/Golectra/internal/store"
 )
 
-func initStorage(cfg config.ServerConfig) *store.MemStorage {
-	st := store.NewMemStorage()
+func initStorage(cfg config.ServerConfig) store.Storage {
+	base := store.NewMemStorage()
 	if cfg.Restore {
-		if err := store.LoadFromFile(st, cfg.File); err != nil {
+		if err := store.LoadFromFile(base, cfg.File); err != nil {
 			log.Printf("restore failed: %v", err)
 		} else {
 			log.Printf("restore ok from %s", cfg.File)
 		}
 	}
-	return st
+
+	if cfg.DSN == "" {
+		return base
+	}
+
+	db, err := sql.Open("postgres", cfg.DSN)
+	if err != nil {
+		log.Printf("db open error: %v", err)
+		return base
+	}
+
+	return store.NewSQLStorage(base, db)
 }
 
 func initPersistence(st store.Storage, h *Handler, cfg config.ServerConfig) {
