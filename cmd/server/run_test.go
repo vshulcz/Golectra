@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vshulcz/Golectra/internal/store"
+	filemem "github.com/vshulcz/Golectra/internal/store/file"
+	"github.com/vshulcz/Golectra/internal/store/memory"
 )
 
 func Test_run_UsesConfig(t *testing.T) {
@@ -66,9 +67,9 @@ func Test_run_RestoreFromFile(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "restore.json")
 
-	st := store.NewMemStorage()
+	st := memory.NewMemStorage()
 	_ = st.UpdateGauge("X", 3.14)
-	if err := store.SaveToFile(st, file); err != nil {
+	if err := filemem.SaveToFile(st, file); err != nil {
 		t.Fatalf("SaveToFile: %v", err)
 	}
 
@@ -127,8 +128,8 @@ func Test_run_SyncSave(t *testing.T) {
 		t.Fatalf("POST /update got %d", rec.Code)
 	}
 
-	st2 := store.NewMemStorage()
-	if err := store.LoadFromFile(st2, file); err != nil {
+	st2 := memory.NewMemStorage()
+	if err := filemem.LoadFromFile(st2, file); err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
 	if v, ok := st2.GetGauge("M1"); !ok || v != 99.9 {
@@ -165,8 +166,8 @@ func Test_run_PeriodicSave(t *testing.T) {
 
 	time.Sleep(1500 * time.Millisecond)
 
-	st2 := store.NewMemStorage()
-	if err := store.LoadFromFile(st2, file); err != nil {
+	st2 := memory.NewMemStorage()
+	if err := filemem.LoadFromFile(st2, file); err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
 	if v, ok := st2.GetCounter("C1"); !ok || v != 5 {

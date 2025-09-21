@@ -9,6 +9,9 @@ import (
 
 	"github.com/vshulcz/Golectra/internal/config"
 	"github.com/vshulcz/Golectra/internal/store"
+	"github.com/vshulcz/Golectra/internal/store/file"
+	"github.com/vshulcz/Golectra/internal/store/memory"
+	"github.com/vshulcz/Golectra/internal/store/postgres"
 )
 
 func initStorage(cfg config.ServerConfig) store.Storage {
@@ -19,18 +22,18 @@ func initStorage(cfg config.ServerConfig) store.Storage {
 		} else {
 			if err := db.Ping(); err != nil {
 				log.Printf("db ping failed: %v", err)
-			} else if err := store.Migrate(db); err != nil {
+			} else if err := postgres.Migrate(db); err != nil {
 				log.Printf("db migrate failed: %v", err)
 			} else {
 				log.Printf("db connected & migrated")
-				return store.NewSQLStorage(db)
+				return postgres.NewSQLStorage(db)
 			}
 		}
 	}
 
-	base := store.NewMemStorage()
+	base := memory.NewMemStorage()
 	if cfg.Restore {
-		if err := store.LoadFromFile(base, cfg.File); err != nil {
+		if err := file.LoadFromFile(base, cfg.File); err != nil {
 			log.Printf("restore failed: %v", err)
 		} else {
 			log.Printf("restore ok from %s", cfg.File)
@@ -41,14 +44,14 @@ func initStorage(cfg config.ServerConfig) store.Storage {
 }
 
 func initPersistence(st store.Storage, h *Handler, cfg config.ServerConfig) {
-	if _, ok := st.(*store.SQLStorage); ok {
+	if _, ok := st.(*postgres.SQLStorage); ok {
 		return
 	}
 
 	switch {
 	case cfg.Interval == 0:
 		h.SetAfterUpdate(func() {
-			if err := store.SaveToFile(st, cfg.File); err != nil {
+			if err := file.SaveToFile(st, cfg.File); err != nil {
 				log.Printf("save sync failed: %v", err)
 			}
 		})
@@ -59,7 +62,7 @@ func initPersistence(st store.Storage, h *Handler, cfg config.ServerConfig) {
 		ticker := time.NewTicker(cfg.Interval)
 		go func() {
 			for range ticker.C {
-				if err := store.SaveToFile(st, cfg.File); err != nil {
+				if err := file.SaveToFile(st, cfg.File); err != nil {
 					log.Printf("save periodic failed: %v", err)
 				}
 			}

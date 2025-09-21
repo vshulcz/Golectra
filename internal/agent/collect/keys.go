@@ -1,4 +1,4 @@
-package agent
+package collect
 
 const (
 	MAlloc         = "Alloc"

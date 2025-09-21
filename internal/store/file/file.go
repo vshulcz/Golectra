@@ -1,4 +1,4 @@
-package store
+package file
 
 import (
 	"encoding/json"
@@ -8,9 +8,10 @@ import (
 	"path/filepath"
 
 	"github.com/vshulcz/Golectra/internal/domain"
+	"github.com/vshulcz/Golectra/internal/store"
 )
 
-func SaveToFile(s Storage, path string) error {
+func SaveToFile(s store.Storage, path string) error {
 	g, c := s.Snapshot()
 
 	total := len(g) + len(c)
@@ -74,7 +75,7 @@ func SaveToFile(s Storage, path string) error {
 	return nil
 }
 
-func LoadFromFile(s Storage, path string) error {
+func LoadFromFile(s store.Storage, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

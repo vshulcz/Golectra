@@ -12,6 +12,7 @@ import (
 
 	"github.com/vshulcz/Golectra/internal/domain"
 	"github.com/vshulcz/Golectra/internal/store"
+	"github.com/vshulcz/Golectra/internal/store/memory"
 	"go.uber.org/zap"
 )
 
@@ -76,7 +77,7 @@ func gzipBytes(t *testing.T, b []byte) []byte {
 }
 
 func TestHTTP_PathAndHTML(t *testing.T) {
-	srv := newServer(t, store.NewMemStorage())
+	srv := newServer(t, memory.NewMemStorage())
 	defer srv.Close()
 
 	type tc struct {
@@ -215,7 +216,7 @@ func TestHTTP_PathAndHTML(t *testing.T) {
 }
 
 func TestHTTP_JSON(t *testing.T) {
-	srv := newServer(t, store.NewMemStorage())
+	srv := newServer(t, memory.NewMemStorage())
 	defer srv.Close()
 
 	type jtc struct {
@@ -342,7 +343,7 @@ func (p *pingOKStorage) Ping() error { return nil }
 
 func TestHTTP_Ping(t *testing.T) {
 	t.Run("mem storage -> 500 (db not configured)", func(t *testing.T) {
-		srv := newServer(t, store.NewMemStorage())
+		srv := newServer(t, memory.NewMemStorage())
 		defer srv.Close()
 		resp, _ := doReq(t, http.MethodGet, srv.URL+"/ping", nil, nil)
 		if resp.StatusCode != http.StatusInternalServerError {
@@ -351,7 +352,7 @@ func TestHTTP_Ping(t *testing.T) {
 	})
 
 	t.Run("ok when storage.Ping()==nil", func(t *testing.T) {
-		srv := newServer(t, &pingOKStorage{Storage: store.NewMemStorage()})
+		srv := newServer(t, &pingOKStorage{Storage: memory.NewMemStorage()})
 		defer srv.Close()
 		resp, _ := doReq(t, http.MethodGet, srv.URL+"/ping", nil, nil)
 		if resp.StatusCode != http.StatusOK {

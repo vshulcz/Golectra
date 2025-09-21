@@ -1,9 +1,11 @@
-package store
+package file
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/vshulcz/Golectra/internal/store/memory"
 )
 
 func TestSaveAndLoad(t *testing.T) {
@@ -11,7 +13,7 @@ func TestSaveAndLoad(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "metrics.json")
 
-	s1 := NewMemStorage()
+	s1 := memory.NewMemStorage()
 	s1.UpdateGauge("Alloc", 123.4)
 	s1.UpdateCounter("PollCount", 7)
 
@@ -19,7 +21,7 @@ func TestSaveAndLoad(t *testing.T) {
 		t.Fatalf("SaveToFile: %v", err)
 	}
 
-	s2 := NewMemStorage()
+	s2 := memory.NewMemStorage()
 	if err := LoadFromFile(s2, file); err != nil {
 		t.Fatalf("LoadFromFile: %v", err)
 	}
@@ -35,12 +37,12 @@ func TestSaveAndLoad(t *testing.T) {
 	dir = t.TempDir()
 	file = filepath.Join(dir, "metrics.json")
 
-	s1 = NewMemStorage()
+	s1 = memory.NewMemStorage()
 	if err := SaveToFile(s1, file); err != nil {
 		t.Fatalf("SaveToFile empty: %v", err)
 	}
 
-	s2 = NewMemStorage()
+	s2 = memory.NewMemStorage()
 	if err := LoadFromFile(s2, file); err != nil {
 		t.Fatalf("LoadFromFile empty: %v", err)
 	}
@@ -54,7 +56,7 @@ func TestSaveAndLoad(t *testing.T) {
 func TestLoadFromFile(t *testing.T) {
 	// File does not exist
 	file := filepath.Join(t.TempDir(), "nope.json")
-	s := NewMemStorage()
+	s := memory.NewMemStorage()
 	if err := LoadFromFile(s, file); err != nil {
 		t.Fatalf("LoadFromFile non-existent: %v", err)
 	}
@@ -65,7 +67,7 @@ func TestLoadFromFile(t *testing.T) {
 	if err := os.WriteFile(file, []byte("{not json"), 0644); err != nil {
 		t.Fatalf("write bad json: %v", err)
 	}
-	s = NewMemStorage()
+	s = memory.NewMemStorage()
 	if err := LoadFromFile(s, file); err == nil {
 		t.Fatalf("expected error for bad JSON, got nil")
 	}
@@ -73,7 +75,7 @@ func TestLoadFromFile(t *testing.T) {
 
 func TestSaveToFile_CreateError(t *testing.T) {
 	dir := t.TempDir()
-	if err := SaveToFile(NewMemStorage(), dir); err == nil {
+	if err := SaveToFile(memory.NewMemStorage(), dir); err == nil {
 		t.Fatalf("expected error when saving to directory path, got nil")
 	}
 }

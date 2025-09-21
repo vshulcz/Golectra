@@ -1,17 +1,19 @@
-package store
+package postgres
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/vshulcz/Golectra/internal/store"
 )
 
 type SQLStorage struct {
 	db *sql.DB
 }
 
-func NewSQLStorage(db *sql.DB) Storage {
+func NewSQLStorage(db *sql.DB) store.Storage {
 	return &SQLStorage{
 		db: db,
 	}
