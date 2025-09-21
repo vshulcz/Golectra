@@ -12,6 +12,22 @@ import (
 )
 
 func initStorage(cfg config.ServerConfig) store.Storage {
+	if cfg.DSN != "" {
+		db, err := sql.Open("postgres", cfg.DSN)
+		if err != nil {
+			log.Printf("db open error: %v", err)
+		} else {
+			if err := db.Ping(); err != nil {
+				log.Printf("db ping failed: %v", err)
+			} else if err := store.Migrate(db); err != nil {
+				log.Printf("db migrate failed: %v", err)
+			} else {
+				log.Printf("db connected & migrated")
+				return store.NewSQLStorage(db)
+			}
+		}
+	}
+
 	base := store.NewMemStorage()
 	if cfg.Restore {
 		if err := store.LoadFromFile(base, cfg.File); err != nil {
@@ -21,20 +37,14 @@ func initStorage(cfg config.ServerConfig) store.Storage {
 		}
 	}
 
-	if cfg.DSN == "" {
-		return base
-	}
-
-	db, err := sql.Open("postgres", cfg.DSN)
-	if err != nil {
-		log.Printf("db open error: %v", err)
-		return base
-	}
-
-	return store.NewSQLStorage(base, db)
+	return base
 }
 
 func initPersistence(st store.Storage, h *Handler, cfg config.ServerConfig) {
+	if _, ok := st.(*store.SQLStorage); ok {
+		return
+	}
+
 	switch {
 	case cfg.Interval == 0:
 		h.SetAfterUpdate(func() {

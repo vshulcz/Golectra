@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/vshulcz/Golectra/internal/domain"
 	"github.com/vshulcz/Golectra/internal/store"
-	"github.com/vshulcz/Golectra/models"
 )
 
 type Handler struct {
@@ -23,14 +23,6 @@ func (h *Handler) SetAfterUpdate(fn func()) {
 	h.afterUpdate = fn
 }
 
-func (h *Handler) PingDB(c *gin.Context) {
-	if err := h.storage.Ping(); err != nil {
-		c.String(http.StatusInternalServerError, "db ping error: %v", err)
-		return
-	}
-	c.String(http.StatusOK, "ok")
-}
-
 // POST /update/:type/:name/:value
 func (h *Handler) UpdateMetric(c *gin.Context) {
 	metricType, metricName, metricValue := c.Param("type"), c.Param("name"), c.Param("value")
@@ -41,7 +33,7 @@ func (h *Handler) UpdateMetric(c *gin.Context) {
 	}
 
 	switch metricType {
-	case string(models.Gauge):
+	case string(domain.Gauge):
 		val, err := strconv.ParseFloat(metricValue, 64)
 		if err != nil {
 			c.String(http.StatusBadRequest, "bad request")
@@ -52,7 +44,7 @@ func (h *Handler) UpdateMetric(c *gin.Context) {
 			h.afterUpdate()
 		}
 
-	case string(models.Counter):
+	case string(domain.Counter):
 		val, err := strconv.ParseInt(metricValue, 10, 64)
 		if err != nil {
 			c.String(http.StatusBadRequest, "bad request")
@@ -76,14 +68,14 @@ func (h *Handler) GetMetric(c *gin.Context) {
 	metricType, metricName := c.Param("type"), c.Param("name")
 
 	switch metricType {
-	case string(models.Gauge):
+	case string(domain.Gauge):
 		if v, ok := h.storage.GetGauge(metricName); ok {
 			c.Data(http.StatusOK, "text/plain; charset=utf-8",
 				[]byte(strconv.FormatFloat(v, 'f', -1, 64)))
 			return
 		}
 		c.String(http.StatusNotFound, "not found")
-	case string(models.Counter):
+	case string(domain.Counter):
 		if v, ok := h.storage.GetCounter(metricName); ok {
 			c.Data(http.StatusOK, "text/plain; charset=utf-8",
 				[]byte(strconv.FormatInt(v, 10)))
@@ -131,14 +123,14 @@ func (h *Handler) Index(c *gin.Context) {
 
 // POST /update  (application/json)
 func (h *Handler) UpdateMetricJSON(c *gin.Context) {
-	var m models.Metrics
+	var m domain.Metrics
 	if err := c.ShouldBindJSON(&m); err != nil || strings.TrimSpace(m.ID) == "" {
 		c.String(http.StatusBadRequest, "bad request")
 		return
 	}
 
 	switch m.MType {
-	case string(models.Gauge):
+	case string(domain.Gauge):
 		if m.Value == nil {
 			c.String(http.StatusBadRequest, "bad request")
 			return
@@ -148,13 +140,13 @@ func (h *Handler) UpdateMetricJSON(c *gin.Context) {
 			h.afterUpdate()
 		}
 		if v, ok := h.storage.GetGauge(m.ID); ok {
-			resp := models.Metrics{ID: m.ID, MType: m.MType, Value: &v}
+			resp := domain.Metrics{ID: m.ID, MType: m.MType, Value: &v}
 			c.JSON(http.StatusOK, resp)
 			return
 		}
 		c.String(http.StatusNotFound, "not found")
 
-	case string(models.Counter):
+	case string(domain.Counter):
 		if m.Delta == nil {
 			c.String(http.StatusBadRequest, "bad request")
 			return
@@ -164,7 +156,7 @@ func (h *Handler) UpdateMetricJSON(c *gin.Context) {
 			h.afterUpdate()
 		}
 		if v, ok := h.storage.GetCounter(m.ID); ok {
-			resp := models.Metrics{ID: m.ID, MType: m.MType, Delta: &v}
+			resp := domain.Metrics{ID: m.ID, MType: m.MType, Delta: &v}
 			c.JSON(http.StatusOK, resp)
 			return
 		}
@@ -177,24 +169,24 @@ func (h *Handler) UpdateMetricJSON(c *gin.Context) {
 
 // POST /value  (application/json)
 func (h *Handler) GetMetricJSON(c *gin.Context) {
-	var q models.Metrics
+	var q domain.Metrics
 	if err := c.ShouldBindJSON(&q); err != nil || strings.TrimSpace(q.ID) == "" {
 		c.String(http.StatusBadRequest, "bad request")
 		return
 	}
 
 	switch q.MType {
-	case string(models.Gauge):
+	case string(domain.Gauge):
 		if v, ok := h.storage.GetGauge(q.ID); ok {
-			resp := models.Metrics{ID: q.ID, MType: q.MType, Value: &v}
+			resp := domain.Metrics{ID: q.ID, MType: q.MType, Value: &v}
 			c.JSON(http.StatusOK, resp)
 			return
 		}
 		c.String(http.StatusNotFound, "not found")
 
-	case string(models.Counter):
+	case string(domain.Counter):
 		if v, ok := h.storage.GetCounter(q.ID); ok {
-			resp := models.Metrics{ID: q.ID, MType: q.MType, Delta: &v}
+			resp := domain.Metrics{ID: q.ID, MType: q.MType, Delta: &v}
 			c.JSON(http.StatusOK, resp)
 			return
 		}
@@ -203,4 +195,13 @@ func (h *Handler) GetMetricJSON(c *gin.Context) {
 	default:
 		c.String(http.StatusBadRequest, "bad request")
 	}
+}
+
+// GET /ping
+func (h *Handler) Ping(c *gin.Context) {
+	if err := h.storage.Ping(); err != nil {
+		c.String(http.StatusInternalServerError, "db ping error: %v", err)
+		return
+	}
+	c.String(http.StatusOK, "ok")
 }

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/vshulcz/Golectra/internal/config"
-	"github.com/vshulcz/Golectra/models"
+	"github.com/vshulcz/Golectra/internal/domain"
 )
 
 type runtimeAgent struct {
@@ -72,14 +72,14 @@ func (a *runtimeAgent) reportOnce() {
 
 	for name, val := range g {
 		v := val
-		msg := models.Metrics{ID: name, MType: string(models.Gauge), Value: &v}
+		msg := domain.Metrics{ID: name, MType: string(domain.Gauge), Value: &v}
 		if err := a.postJSON(endpoint, msg); err != nil {
 			log.Printf("agent: post gauge %s err: %v", name, err)
 		}
 	}
 	for name, delta := range c {
 		d := delta
-		msg := models.Metrics{ID: name, MType: string(models.Counter), Delta: &d}
+		msg := domain.Metrics{ID: name, MType: string(domain.Counter), Delta: &d}
 		if err := a.postJSON(endpoint, msg); err != nil {
 			log.Printf("agent: post counter %s err: %v", name, err)
 		}
@@ -125,7 +125,7 @@ func (a *runtimeAgent) post(urlStr string) error {
 	return nil
 }
 
-func (a *runtimeAgent) postJSON(endpoint string, m models.Metrics) error {
+func (a *runtimeAgent) postJSON(endpoint string, m domain.Metrics) error {
 	raw, err := json.Marshal(m)
 	if err != nil {
 		return err

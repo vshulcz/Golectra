@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/vshulcz/Golectra/internal/config"
-	"github.com/vshulcz/Golectra/models"
+	"github.com/vshulcz/Golectra/internal/domain"
 )
 
 func TestScope_NewRuntimeAgent_Defaults(t *testing.T) {
@@ -124,7 +124,7 @@ func TestScope_postJSON(t *testing.T) {
 		acc  string
 		ae   string
 		ce   string
-		body models.Metrics
+		body domain.Metrics
 	}
 	var got seen
 
@@ -156,7 +156,7 @@ func TestScope_postJSON(t *testing.T) {
 
 	t.Run("gauge", func(t *testing.T) {
 		v := 123.45
-		msg := models.Metrics{ID: "Alloc", MType: string(models.Gauge), Value: &v}
+		msg := domain.Metrics{ID: "Alloc", MType: string(domain.Gauge), Value: &v}
 		if err := agt.postJSON(srvOK.URL, msg); err != nil {
 			t.Fatalf("postJSON gauge err: %v", err)
 		}
@@ -179,7 +179,7 @@ func TestScope_postJSON(t *testing.T) {
 
 	t.Run("counter", func(t *testing.T) {
 		d := int64(7)
-		msg := models.Metrics{ID: "PollCount", MType: string(models.Counter), Delta: &d}
+		msg := domain.Metrics{ID: "PollCount", MType: string(domain.Counter), Delta: &d}
 		if err := agt.postJSON(srvOK.URL, msg); err != nil {
 			t.Fatalf("postJSON counter err: %v", err)
 		}
@@ -194,7 +194,7 @@ func TestScope_postJSON(t *testing.T) {
 		}))
 		defer srvBad.Close()
 		v := 1.0
-		err := agt.postJSON(srvBad.URL, models.Metrics{ID: "X", MType: "gauge", Value: &v})
+		err := agt.postJSON(srvBad.URL, domain.Metrics{ID: "X", MType: "gauge", Value: &v})
 		if err == nil || !strings.Contains(err.Error(), "400") {
 			t.Fatalf("want error with 400, got %v", err)
 		}
@@ -205,7 +205,7 @@ func TestScope_reportOnce_SendsAllMetrics(t *testing.T) {
 	var (
 		gotPaths []string
 		gotCT    []string
-		gotMsgs  []models.Metrics
+		gotMsgs  []domain.Metrics
 	)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPaths = append(gotPaths, r.URL.Path)
@@ -223,7 +223,7 @@ func TestScope_reportOnce_SendsAllMetrics(t *testing.T) {
 			reader = gr
 		}
 		b, _ := io.ReadAll(reader)
-		var m models.Metrics
+		var m domain.Metrics
 		json.Unmarshal(b, &m)
 		gotMsgs = append(gotMsgs, m)
 
