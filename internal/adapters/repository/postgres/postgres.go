@@ -3,10 +3,16 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"net"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgerrcode"
+	"github.com/lib/pq"
 	"github.com/vshulcz/Golectra/internal/domain"
+	"github.com/vshulcz/Golectra/internal/misc"
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
@@ -23,7 +29,17 @@ func New(db *sql.DB) *Repo {
 func (r *Repo) GetGauge(ctx context.Context, n string) (float64, error) {
 	const q = `SELECT value FROM metrics WHERE id=$1 AND mtype=$2`
 	var v sql.NullFloat64
-	if err := r.db.QueryRowContext(ctx, q, n, string(domain.Gauge)).Scan(&v); err != nil || !v.Valid {
+	op := func() error {
+		v = sql.NullFloat64{}
+		return r.db.QueryRowContext(ctx, q, n, string(domain.Gauge)).Scan(&v)
+	}
+	if err := misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, op); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, domain.ErrNotFound
+		}
+		return 0, err
+	}
+	if !v.Valid {
 		return 0, domain.ErrNotFound
 	}
 	return v.Float64, nil
@@ -32,7 +48,17 @@ func (r *Repo) GetGauge(ctx context.Context, n string) (float64, error) {
 func (r *Repo) GetCounter(ctx context.Context, n string) (int64, error) {
 	const q = `SELECT delta FROM metrics WHERE id=$1 AND mtype=$2`
 	var d sql.NullInt64
-	if err := r.db.QueryRowContext(ctx, q, n, string(domain.Counter)).Scan(&d); err != nil || !d.Valid {
+	op := func() error {
+		d = sql.NullInt64{}
+		return r.db.QueryRowContext(ctx, q, n, string(domain.Counter)).Scan(&d)
+	}
+	if err := misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, op); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, domain.ErrNotFound
+		}
+		return 0, err
+	}
+	if !d.Valid {
 		return 0, domain.ErrNotFound
 	}
 	return d.Int64, nil
@@ -44,8 +70,11 @@ INSERT INTO metrics (id, mtype, value, delta, updated_at)
 VALUES ($1, $2, $3, NULL, now())
 ON CONFLICT (id)
 DO UPDATE SET mtype=$2, value=EXCLUDED.value, delta=NULL, updated_at=now();`
-	_, err := r.db.ExecContext(ctx, q, n, string(domain.Gauge), v)
-	return err
+	op := func() error {
+		_, err := r.db.ExecContext(ctx, q, n, string(domain.Gauge), v)
+		return err
+	}
+	return misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, op)
 }
 
 func (r *Repo) AddCounter(ctx context.Context, n string, d int64) error {
@@ -54,8 +83,11 @@ INSERT INTO metrics (id, mtype, value, delta, updated_at)
 VALUES ($1, $2, NULL, $3, now())
 ON CONFLICT (id)
 DO UPDATE SET mtype=$2, value=NULL, delta=COALESCE(metrics.delta,0)+EXCLUDED.delta, updated_at=now();`
-	_, err := r.db.ExecContext(ctx, q, n, string(domain.Counter), d)
-	return err
+	op := func() error {
+		_, err := r.db.ExecContext(ctx, q, n, string(domain.Counter), d)
+		return err
+	}
+	return misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, op)
 }
 
 func (r *Repo) UpdateMany(ctx context.Context, items []domain.Metrics) error {
@@ -63,17 +95,6 @@ func (r *Repo) UpdateMany(ctx context.Context, items []domain.Metrics) error {
 		return nil
 	}
 
-	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
-	if err != nil {
-		return err
-	}
-
-	rollback := true
-	defer func() {
-		if rollback {
-			_ = tx.Rollback()
-		}
-	}()
 	const qGauge = `
 INSERT INTO metrics (id, mtype, value, delta, updated_at)
 VALUES ($1, $2, $3, NULL, now())
@@ -84,30 +105,41 @@ INSERT INTO metrics (id, mtype, value, delta, updated_at)
 VALUES ($1, $2, NULL, $3, now())
 ON CONFLICT (id)
 DO UPDATE SET mtype=$2, value=NULL, delta=COALESCE(metrics.delta,0)+EXCLUDED.delta, updated_at=now();`
-	for _, it := range items {
-		switch it.MType {
-		case string(domain.Gauge):
-			if it.Value == nil {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, qGauge, it.ID, string(domain.Gauge), *it.Value); err != nil {
-				return err
-			}
-		case string(domain.Counter):
-			if it.Delta == nil {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, qCounter, it.ID, string(domain.Counter), *it.Delta); err != nil {
-				return err
-			}
-		default:
+
+	attempt := func() error {
+		tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+		if err != nil {
+			return err
 		}
+		defer func() {
+			tx.Rollback()
+		}()
+
+		for _, it := range items {
+			switch it.MType {
+			case string(domain.Gauge):
+				if it.Value == nil {
+					continue
+				}
+				if _, err := tx.ExecContext(ctx, qGauge, it.ID, string(domain.Gauge), *it.Value); err != nil {
+					return err
+				}
+			case string(domain.Counter):
+				if it.Delta == nil {
+					continue
+				}
+				if _, err := tx.ExecContext(ctx, qCounter, it.ID, string(domain.Counter), *it.Delta); err != nil {
+					return err
+				}
+			default:
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		return nil
 	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	rollback = false
-	return nil
+	return misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, attempt)
 }
 
 func (r *Repo) Snapshot(ctx context.Context) (domain.Snapshot, error) {
@@ -115,8 +147,13 @@ func (r *Repo) Snapshot(ctx context.Context) (domain.Snapshot, error) {
 	g := map[string]float64{}
 	c := map[string]int64{}
 
-	rows, err := r.db.QueryContext(ctx, q)
-	if err != nil {
+	var rows *sql.Rows
+	op := func() error {
+		var err error
+		rows, err = r.db.QueryContext(ctx, q)
+		return err
+	}
+	if err := misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, op); err != nil {
 		return domain.Snapshot{Gauges: g, Counters: c}, err
 	}
 	defer rows.Close()
@@ -151,5 +188,40 @@ func (r *Repo) Ping(ctx context.Context) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	return r.db.PingContext(ctx)
+	op := func() error {
+		return r.db.PingContext(ctx)
+	}
+	return misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, op)
+}
+
+func IsRetryable(err error) bool {
+	return isRetryablePG(err)
+}
+
+func isRetryablePG(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, driver.ErrBadConn) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return true
+	}
+	var pqe *pq.Error
+	if errors.As(err, &pqe) {
+		code := string(pqe.Code)
+		if strings.HasPrefix(code, "08") ||
+			code == pgerrcode.ConnectionException ||
+			code == pgerrcode.ConnectionDoesNotExist ||
+			code == pgerrcode.ConnectionFailure ||
+			code == pgerrcode.SQLClientUnableToEstablishSQLConnection ||
+			code == pgerrcode.SQLServerRejectedEstablishmentOfSQLConnection ||
+			code == pgerrcode.TransactionResolutionUnknown ||
+			code == pgerrcode.ProtocolViolation {
+			return true
+		}
+	}
+	return false
 }

@@ -3,12 +3,18 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"net"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/jackc/pgerrcode"
+	"github.com/lib/pq"
 	"github.com/vshulcz/Golectra/internal/domain"
+	"github.com/vshulcz/Golectra/internal/misc"
 )
 
 func TestRepo_GetGauge(t *testing.T) {
@@ -372,3 +378,234 @@ DO UPDATE SET mtype=$2, value=NULL, delta=COALESCE(metrics.delta,0)+EXCLUDED.del
 
 func ptrFloat64(v float64) *float64 { return &v }
 func ptrInt64(v int64) *int64       { return &v }
+
+func Test_isRetryablePG(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"driver.ErrBadConn", driver.ErrBadConn, true},
+		{"net.OpError", &net.OpError{Op: "dial", Err: errors.New("refused")}, true},
+		{"pq 08 (ConnectionFailure)", &pq.Error{Code: pq.ErrorCode(pgerrcode.ConnectionFailure)}, true},
+		{"pq 08 (ConnectionException)", &pq.Error{Code: pq.ErrorCode(pgerrcode.ConnectionException)}, true},
+		{"pq ProtocolViolation", &pq.Error{Code: pq.ErrorCode(pgerrcode.ProtocolViolation)}, true},
+		{"pq UniqueViolation (non-retryable)", &pq.Error{Code: pq.ErrorCode(pgerrcode.UniqueViolation)}, false},
+		{"generic", errors.New("boom"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isRetryablePG(tt.err); got != tt.want {
+				t.Fatalf("isRetryablePG(%T) = %v, want %v", tt.err, got, tt.want)
+			}
+			if got := IsRetryable(tt.err); got != tt.want {
+				t.Fatalf("IsRetryable(%T) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepo_GetGauge_Retry(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	_, mock, st, done := newMock(t)
+	defer done()
+
+	const q = `SELECT value FROM metrics WHERE id=\$1 AND mtype=\$2`
+
+	mock.ExpectQuery(q).WithArgs("Alloc", "gauge").
+		WillReturnError(&pq.Error{Code: pq.ErrorCode(pgerrcode.ConnectionFailure)})
+	mock.ExpectQuery(q).WithArgs("Alloc", "gauge").
+		WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(100.5))
+
+	got, err := st.GetGauge(context.Background(), "Alloc")
+	if err != nil {
+		t.Fatalf("GetGauge error: %v", err)
+	}
+	if got != 100.5 {
+		t.Fatalf("GetGauge=%v want 100.5", got)
+	}
+}
+
+func TestRepo_GetCounter_Retry(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	_, mock, st, done := newMock(t)
+	defer done()
+
+	const q = `SELECT delta FROM metrics WHERE id=\$1 AND mtype=\$2`
+
+	mock.ExpectQuery(q).WithArgs("Poll", "counter").
+		WillReturnError(&net.OpError{Op: "read", Err: errors.New("reset")})
+	mock.ExpectQuery(q).WithArgs("Poll", "counter").
+		WillReturnRows(sqlmock.NewRows([]string{"delta"}).AddRow(int64(7)))
+
+	got, err := st.GetCounter(context.Background(), "Poll")
+	if err != nil {
+		t.Fatalf("GetCounter error: %v", err)
+	}
+	if got != 7 {
+		t.Fatalf("GetCounter=%v want 7", got)
+	}
+}
+
+func TestRepo_GetGauge_NoRetry(t *testing.T) {
+	_, mock, st, done := newMock(t)
+	defer done()
+
+	const q = `SELECT value FROM metrics WHERE id=\$1 AND mtype=\$2`
+	mock.ExpectQuery(q).WithArgs("Id", "gauge").
+		WillReturnError(&pq.Error{Code: pq.ErrorCode(pgerrcode.UniqueViolation)})
+
+	_, err := st.GetGauge(context.Background(), "Id")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestRepo_SetGauge_Retry(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	_, mock, st, done := newMock(t)
+	defer done()
+
+	const q = `
+INSERT INTO metrics (id, mtype, value, delta, updated_at)
+VALUES ($1, $2, $3, NULL, now())
+ON CONFLICT (id)
+DO UPDATE SET mtype=$2, value=EXCLUDED.value, delta=NULL, updated_at=now();`
+
+	mock.ExpectExec(qm(q)).WithArgs("Alloc", "gauge", 1.23).
+		WillReturnError(&pq.Error{Code: pq.ErrorCode(pgerrcode.ConnectionDoesNotExist)})
+	mock.ExpectExec(qm(q)).WithArgs("Alloc", "gauge", 1.23).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := st.SetGauge(context.Background(), "Alloc", 1.23); err != nil {
+		t.Fatalf("SetGauge error: %v", err)
+	}
+}
+
+func TestRepo_AddCounter_Retr(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	_, mock, st, done := newMock(t)
+	defer done()
+
+	const q = `
+INSERT INTO metrics (id, mtype, value, delta, updated_at)
+VALUES ($1, $2, NULL, $3, now())
+ON CONFLICT (id)
+DO UPDATE SET mtype=$2, value=NULL, delta=COALESCE(metrics.delta,0)+EXCLUDED.delta, updated_at=now();`
+
+	mock.ExpectExec(qm(q)).WithArgs("C", "counter", int64(5)).WillReturnError(&net.OpError{Op: "write", Err: errors.New("broken pipe")})
+	mock.ExpectExec(qm(q)).WithArgs("C", "counter", int64(5)).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := st.AddCounter(context.Background(), "C", 5); err != nil {
+		t.Fatalf("AddCounter error: %v", err)
+	}
+}
+
+func TestRepo_UpdateMany_Retry(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	_, mock, st, done := newMock(t)
+	defer done()
+
+	const qGauge = `
+INSERT INTO metrics (id, mtype, value, delta, updated_at)
+VALUES ($1, $2, $3, NULL, now())
+ON CONFLICT (id)
+DO UPDATE SET mtype=$2, value=EXCLUDED.value, delta=NULL, updated_at=now();`
+	const qCounter = `
+INSERT INTO metrics (id, mtype, value, delta, updated_at)
+VALUES ($1, $2, NULL, $3, now())
+ON CONFLICT (id)
+DO UPDATE SET mtype=$2, value=NULL, delta=COALESCE(metrics.delta,0)+EXCLUDED.delta, updated_at=now();`
+
+	mock.ExpectBegin().WillReturnError(&pq.Error{Code: pq.ErrorCode(pgerrcode.ConnectionException)})
+	mock.ExpectBegin()
+	mock.ExpectExec(qm(qGauge)).WithArgs("g", "gauge", 3.14).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(qm(qCounter)).WithArgs("c", "counter", int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	items := []domain.Metrics{
+		{ID: "g", MType: "gauge", Value: ptrFloat64(3.14)},
+		{ID: "c", MType: "counter", Delta: ptrInt64(7)},
+	}
+	if err := st.UpdateMany(context.Background(), items); err != nil {
+		t.Fatalf("UpdateMany error: %v", err)
+	}
+}
+
+func TestRepo_Snapshot_Retry(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	_, mock, st, done := newMock(t)
+	defer done()
+
+	const q = `SELECT id, mtype, value, delta FROM metrics`
+
+	mock.ExpectQuery(q).WillReturnError(&pq.Error{Code: pq.ErrorCode(pgerrcode.ConnectionDoesNotExist)})
+	rows := sqlmock.NewRows([]string{"id", "mtype", "value", "delta"}).
+		AddRow("Alloc", "gauge", 12.5, nil).
+		AddRow("PollCount", "counter", nil, int64(9))
+	mock.ExpectQuery(q).WillReturnRows(rows)
+
+	s, err := st.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot error: %v", err)
+	}
+	if s.Gauges["Alloc"] != 12.5 || s.Counters["PollCount"] != 9 {
+		t.Fatalf("unexpected snapshot: %+v", s)
+	}
+}
+
+func TestRepo_Ping_Retry(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	_, mock, st, done := newMockWithPing(t)
+	defer done()
+
+	mock.ExpectPing().WillReturnError(&pq.Error{Code: pq.ErrorCode(pgerrcode.ConnectionException)})
+	mock.ExpectPing().WillReturnError(nil)
+
+	if err := st.Ping(context.Background()); err != nil {
+		t.Fatalf("Ping error: %v", err)
+	}
+}
+
+func TestRepo_GetGauge_ContextCancel(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{50 * time.Millisecond, 50 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	_, mock, st, done := newMock(t)
+	defer done()
+
+	const q = `SELECT value FROM metrics WHERE id=\$1 AND mtype=\$2`
+	mock.ExpectQuery(q).WithArgs("X", "gauge").
+		WillReturnError(driver.ErrBadConn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	_, err := st.GetGauge(ctx, "X")
+	if err == nil {
+		t.Fatal("expected context-related error")
+	}
+}
