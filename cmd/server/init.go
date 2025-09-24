@@ -1,71 +1,41 @@
 package main
 
 import (
+	"context"
 	"database/sql"
-	"log"
-	"time"
 
 	_ "github.com/lib/pq"
+	"go.uber.org/zap"
 
+	"github.com/vshulcz/Golectra/internal/adapters/persistance/file"
+	memrepo "github.com/vshulcz/Golectra/internal/adapters/repository/memory"
+	pgrepo "github.com/vshulcz/Golectra/internal/adapters/repository/postgres"
 	"github.com/vshulcz/Golectra/internal/config"
-	"github.com/vshulcz/Golectra/internal/store"
-	"github.com/vshulcz/Golectra/internal/store/file"
-	"github.com/vshulcz/Golectra/internal/store/memory"
-	"github.com/vshulcz/Golectra/internal/store/postgres"
+	"github.com/vshulcz/Golectra/internal/ports"
 )
 
-func initStorage(cfg config.ServerConfig) store.Storage {
+func buildRepoAndPersister(cfg config.ServerConfig, logger *zap.Logger) (ports.MetricsRepo, ports.Persister) {
+	ctx := context.Background()
 	if cfg.DSN != "" {
 		db, err := sql.Open("postgres", cfg.DSN)
-		if err != nil {
-			log.Printf("db open error: %v", err)
-		} else {
-			if err := db.Ping(); err != nil {
-				log.Printf("db ping failed: %v", err)
-			} else if err := postgres.Migrate(db); err != nil {
-				log.Printf("db migrate failed: %v", err)
-			} else {
-				log.Printf("db connected & migrated")
-				return postgres.NewSQLStorage(db)
-			}
-		}
-	}
-
-	base := memory.NewMemStorage()
-	if cfg.Restore {
-		if err := file.LoadFromFile(base, cfg.File); err != nil {
-			log.Printf("restore failed: %v", err)
-		} else {
-			log.Printf("restore ok from %s", cfg.File)
-		}
-	}
-
-	return base
-}
-
-func initPersistence(st store.Storage, h *Handler, cfg config.ServerConfig) {
-	if _, ok := st.(*postgres.SQLStorage); ok {
-		return
-	}
-
-	switch {
-	case cfg.Interval == 0:
-		h.SetAfterUpdate(func() {
-			if err := file.SaveToFile(st, cfg.File); err != nil {
-				log.Printf("save sync failed: %v", err)
-			}
-		})
-	case cfg.Interval > 0:
-		if cfg.Interval < 0 {
-			cfg.Interval = 300 * time.Second
-		}
-		ticker := time.NewTicker(cfg.Interval)
-		go func() {
-			for range ticker.C {
-				if err := file.SaveToFile(st, cfg.File); err != nil {
-					log.Printf("save periodic failed: %v", err)
+		if err == nil {
+			if err = db.Ping(); err == nil {
+				if err = pgrepo.Migrate(db); err == nil {
+					logger.Info("db connected & migrated")
+					return pgrepo.New(db), nil
 				}
 			}
-		}()
+		}
+		logger.Warn("postgres init failed, falling back to memory", zap.Error(err))
 	}
+	repo := memrepo.New()
+	var p ports.Persister = file.New(cfg.File)
+	if cfg.Restore && p != nil {
+		if err := p.Restore(ctx, repo); err != nil {
+			logger.Warn("restore failed", zap.Error(err))
+		} else {
+			logger.Info("restore ok", zap.String("file", cfg.File))
+		}
+	}
+	return repo, p
 }
