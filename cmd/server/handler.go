@@ -23,6 +23,14 @@ func (h *Handler) SetAfterUpdate(fn func()) {
 	h.afterUpdate = fn
 }
 
+func (h *Handler) PingDB(c *gin.Context) {
+	if err := h.storage.Ping(); err != nil {
+		c.String(http.StatusInternalServerError, "db ping error: %v", err)
+		return
+	}
+	c.String(http.StatusOK, "ok")
+}
+
 // POST /update/:type/:name/:value
 func (h *Handler) UpdateMetric(c *gin.Context) {
 	metricType, metricName, metricValue := c.Param("type"), c.Param("name"), c.Param("value")

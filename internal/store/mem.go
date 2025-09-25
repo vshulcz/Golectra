@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"maps"
 	"sync"
 )
 
@@ -50,12 +52,12 @@ func (m *MemStorage) Snapshot() (map[string]float64, map[string]int64) {
 	defer m.mu.RUnlock()
 
 	g := make(map[string]float64, len(m.gauges))
-	for k, v := range m.gauges {
-		g[k] = v
-	}
+	maps.Copy(g, m.gauges)
 	c := make(map[string]int64, len(m.counters))
-	for k, v := range m.counters {
-		c[k] = v
-	}
+	maps.Copy(c, m.counters)
 	return g, c
+}
+
+func (m *MemStorage) Ping() error {
+	return fmt.Errorf("db not configured")
 }
