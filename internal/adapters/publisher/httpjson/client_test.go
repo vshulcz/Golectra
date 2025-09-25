@@ -4,14 +4,21 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/vshulcz/Golectra/internal/domain"
+	"github.com/vshulcz/Golectra/internal/misc"
 )
 
 func TestNew_NormalizeBaseAndTimeout(t *testing.T) {
@@ -446,3 +453,265 @@ func TestSendBatch_EmptyBatchIsNoop(t *testing.T) {
 		t.Fatalf("empty batch should be noop, err=%v", err)
 	}
 }
+
+type scriptedRT struct {
+	mu    sync.Mutex
+	calls int
+	steps []func(*http.Request) (*http.Response, error)
+}
+
+func (s *scriptedRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx := s.calls
+	if idx >= len(s.steps) {
+		idx = len(s.steps) - 1
+	}
+	s.calls++
+	return s.steps[idx](r)
+}
+
+func (s *scriptedRT) Calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
+func mkResp(code int, body string, hdr http.Header) *http.Response {
+	if hdr == nil {
+		hdr = make(http.Header)
+	}
+	return &http.Response{
+		StatusCode: code,
+		Status:     fmt.Sprintf("%d %s", code, http.StatusText(code)),
+		Header:     hdr,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+	}
+}
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "timeout" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+func Test_isRetryableHTTP(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"httpStatus_502", &httpStatusError{code: 502, msg: "bad gateway"}, true},
+		{"httpStatus_503", &httpStatusError{code: 503, msg: "unavailable"}, true},
+		{"httpStatus_504", &httpStatusError{code: 504, msg: "timeout"}, true},
+		{"httpStatus_429", &httpStatusError{code: 429, msg: "ratelimit"}, true},
+		{"httpStatus_400", &httpStatusError{code: 400, msg: "bad"}, false},
+		{"netOpError", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, true},
+		{"urlErrorTimeout", &url.Error{Op: "Get", URL: "http://x", Err: timeoutErr{}}, true},
+		{"connRefused", syscall.ECONNREFUSED, true},
+		{"connReset", syscall.ECONNRESET, true},
+		{"brokenPipe", syscall.EPIPE, true},
+		{"permanentGeneric", errors.New("boom"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isRetryableHTTP(tt.err); got != tt.want {
+				t.Fatalf("isRetryableHTTP(%T)=%v want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSendOne_RetryOnNetworkErrors(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	rt := &scriptedRT{
+		steps: []func(*http.Request) (*http.Response, error){
+			func(*http.Request) (*http.Response, error) {
+				return nil, &net.OpError{Op: "dial", Err: syscall.ECONNRESET}
+			},
+			func(*http.Request) (*http.Response, error) {
+				return nil, &url.Error{Op: "Post", URL: "http://x", Err: timeoutErr{}}
+			},
+			func(*http.Request) (*http.Response, error) {
+				return mkResp(http.StatusOK, "ok", nil), nil
+			},
+		},
+	}
+	hc := &http.Client{Transport: rt, Timeout: 2 * time.Second}
+	c, err := New("http://example", hc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	val := 42.0
+	if err := c.SendOne(context.Background(), domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val}); err != nil {
+		t.Fatalf("SendOne error: %v", err)
+	}
+	if got := rt.Calls(); got != 3 {
+		t.Fatalf("RoundTrip calls=%d want 3", got)
+	}
+}
+
+func TestSendOne_RetryExhausted(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	rt := &scriptedRT{
+		steps: []func(*http.Request) (*http.Response, error){
+			func(*http.Request) (*http.Response, error) {
+				return nil, &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}
+			},
+		},
+	}
+	hc := &http.Client{Transport: rt, Timeout: 2 * time.Second}
+	c, _ := New("http://example", hc)
+
+	val := 1.0
+	err := c.SendOne(context.Background(), domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val})
+	if err == nil || !strings.Contains(err.Error(), "http do:") {
+		t.Fatalf("want http do error, got: %v", err)
+	}
+	if got := rt.Calls(); got != 4 {
+		t.Fatalf("RoundTrip calls=%d want 4 (1 initial + 3 retries)", got)
+	}
+}
+
+func TestSendOne_NoRetry(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	rt := &scriptedRT{
+		steps: []func(*http.Request) (*http.Response, error){
+			func(*http.Request) (*http.Response, error) { return nil, errors.New("perm") },
+		},
+	}
+	hc := &http.Client{Transport: rt}
+	c, _ := New("http://example", hc)
+
+	val := 7.0
+	err := c.SendOne(context.Background(), domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val})
+	if err == nil || !strings.Contains(err.Error(), "http do:") {
+		t.Fatalf("want http do error, got: %v", err)
+	}
+	if got := rt.Calls(); got != 1 {
+		t.Fatalf("RoundTrip calls=%d want 1 (no retry)", got)
+	}
+}
+
+func TestSendOne_NoRetryOn400(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	rt := &scriptedRT{
+		steps: []func(*http.Request) (*http.Response, error){
+			func(*http.Request) (*http.Response, error) {
+				return mkResp(http.StatusBadRequest, "bad", nil), nil
+			},
+		},
+	}
+	hc := &http.Client{Transport: rt}
+	c, _ := New("http://example", hc)
+
+	val := 3.14
+	err := c.SendOne(context.Background(), domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val})
+	if err == nil || !strings.Contains(err.Error(), "400") {
+		t.Fatalf("want 400 error, got: %v", err)
+	}
+	if got := rt.Calls(); got != 1 {
+		t.Fatalf("RoundTrip calls=%d want 1 (status errors are not retried inside op)", got)
+	}
+}
+
+func TestSendBatch_Retry(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	rt := &scriptedRT{
+		steps: []func(*http.Request) (*http.Response, error){
+			func(*http.Request) (*http.Response, error) { return nil, &net.OpError{Op: "write", Err: syscall.EPIPE} },
+			func(*http.Request) (*http.Response, error) { return mkResp(http.StatusOK, "ok", nil), nil },
+		},
+	}
+	hc := &http.Client{Transport: rt}
+	c, _ := New("http://example", hc)
+
+	val := 1.23
+	delta := int64(7)
+	err := c.SendBatch(context.Background(), []domain.Metrics{
+		{ID: "Alloc", MType: "gauge", Value: &val},
+		{ID: "PollCount", MType: "counter", Delta: &delta},
+	})
+	if err != nil {
+		t.Fatalf("SendBatch error: %v", err)
+	}
+	if got := rt.Calls(); got != 2 {
+		t.Fatalf("RoundTrip calls=%d want 2", got)
+	}
+}
+
+func TestSendOne_ContextCancel(t *testing.T) {
+	orig := misc.DefaultBackoff
+	misc.DefaultBackoff = []time.Duration{50 * time.Millisecond, 50 * time.Millisecond, 50 * time.Millisecond}
+	defer func() { misc.DefaultBackoff = orig }()
+
+	rt := &scriptedRT{
+		steps: []func(*http.Request) (*http.Response, error){
+			func(*http.Request) (*http.Response, error) {
+				return nil, &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}
+			},
+		},
+	}
+	hc := &http.Client{Transport: rt}
+	c, _ := New("http://example", hc)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	val := 10.0
+	err := c.SendOne(ctx, domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val})
+	if err == nil || (!strings.Contains(err.Error(), "http do:") && !errors.Is(err, context.DeadlineExceeded)) {
+		t.Fatalf("want context-related error, got: %v", err)
+	}
+	if calls := rt.Calls(); calls < 1 || calls > 2 {
+		t.Fatalf("RoundTrip calls=%d want 1..2 (cancel during backoff)", calls)
+	}
+}
+
+func TestSendOne_ServerGzipResponse(t *testing.T) {
+	rt := &scriptedRT{
+		steps: []func(*http.Request) (*http.Response, error){
+			func(*http.Request) (*http.Response, error) {
+				h := make(http.Header)
+				h.Set("Content-Encoding", "gzip")
+				var b strings.Builder
+				zw := gzip.NewWriter(&nopWriteCloser{&b})
+				_, _ = zw.Write([]byte("ok"))
+				_ = zw.Close()
+				return mkResp(http.StatusOK, b.String(), h), nil
+			},
+		},
+	}
+	hc := &http.Client{Transport: rt}
+	c, _ := New("http://example", hc)
+
+	val := 1.0
+	if err := c.SendOne(context.Background(), domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val}); err != nil {
+		t.Fatalf("SendOne error: %v", err)
+	}
+}
+
+type nopWriteCloser struct{ *strings.Builder }
+
+func (n *nopWriteCloser) Write(p []byte) (int, error) { return n.Builder.Write(p) }
+func (n *nopWriteCloser) Close() error                { return nil }

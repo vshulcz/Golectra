@@ -1,6 +1,7 @@
 package ginserver
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -170,12 +171,12 @@ func (h *Handler) Ping(c *gin.Context) {
 }
 
 func httpError(c *gin.Context, err error) {
-	switch err {
-	case nil:
+	switch {
+	case err == nil:
 		return
-	case domain.ErrNotFound:
+	case errors.Is(err, domain.ErrNotFound):
 		c.String(http.StatusNotFound, "not found")
-	case domain.ErrInvalidType:
+	case errors.Is(err, domain.ErrInvalidType):
 		c.String(http.StatusBadRequest, "bad request")
 	default:
 		c.String(http.StatusInternalServerError, "internal error")

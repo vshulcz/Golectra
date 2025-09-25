@@ -10,17 +10,17 @@ import (
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
-type Runner struct {
+type Service struct {
 	collector ports.MetricsCollector
 	pub       ports.Publisher
 	cfg       config.AgentConfig
 }
 
-func New(cfg config.AgentConfig, c ports.MetricsCollector, p ports.Publisher) *Runner {
-	return &Runner{cfg: cfg, collector: c, pub: p}
+func New(cfg config.AgentConfig, c ports.MetricsCollector, p ports.Publisher) *Service {
+	return &Service{cfg: cfg, collector: c, pub: p}
 }
 
-func (r *Runner) Run(ctx context.Context) error {
+func (r *Service) Run(ctx context.Context) error {
 	if err := r.collector.Start(ctx, r.cfg.PollInterval); err != nil {
 		return err
 	}
@@ -39,7 +39,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 }
 
-func (r *Runner) reportOnce(ctx context.Context) {
+func (r *Service) reportOnce(ctx context.Context) {
 	g, c := r.collector.Snapshot()
 	log.Printf("agent: reporting %d gauges, %d counters", len(g), len(c))
 

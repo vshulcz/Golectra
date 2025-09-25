@@ -5,6 +5,7 @@ go 1.25
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/gin-gonic/gin v1.10.1
+	github.com/jackc/pgerrcode v0.0.0-20250907135507-afb5586c32a6
 	github.com/lib/pq v1.10.9
 	github.com/pressly/goose/v3 v3.25.0
 	go.uber.org/zap v1.27.0
