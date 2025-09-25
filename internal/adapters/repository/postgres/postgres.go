@@ -222,6 +222,24 @@ func isRetryablePG(err error) bool {
 			code == pgerrcode.ProtocolViolation {
 			return true
 		}
+
+		if strings.HasPrefix(code, "40") ||
+			code == pgerrcode.SerializationFailure ||
+			code == pgerrcode.DeadlockDetected {
+			return true
+		}
+
+		if code == pgerrcode.LockNotAvailable ||
+			code == pgerrcode.TooManyConnections {
+			return true
+		}
+
+		if code == pgerrcode.AdminShutdown ||
+			code == pgerrcode.CrashShutdown ||
+			code == pgerrcode.CannotConnectNow ||
+			code == pgerrcode.QueryCanceled {
+			return true
+		}
 	}
 	return false
 }

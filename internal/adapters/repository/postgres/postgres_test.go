@@ -393,6 +393,18 @@ func Test_isRetryablePG(t *testing.T) {
 		{"pq ProtocolViolation", &pq.Error{Code: pq.ErrorCode(pgerrcode.ProtocolViolation)}, true},
 		{"pq UniqueViolation (non-retryable)", &pq.Error{Code: pq.ErrorCode(pgerrcode.UniqueViolation)}, false},
 		{"generic", errors.New("boom"), false},
+
+		{"40001_serialization_failure", &pq.Error{Code: pq.ErrorCode(pgerrcode.SerializationFailure)}, true},
+		{"40P01_deadlock_detected", &pq.Error{Code: pq.ErrorCode(pgerrcode.DeadlockDetected)}, true},
+		{"55P03_lock_not_available", &pq.Error{Code: pq.ErrorCode(pgerrcode.LockNotAvailable)}, true},
+		{"57P01_admin_shutdown", &pq.Error{Code: pq.ErrorCode(pgerrcode.AdminShutdown)}, true},
+		{"57P02_crash_shutdown", &pq.Error{Code: pq.ErrorCode(pgerrcode.CrashShutdown)}, true},
+		{"57P03_cannot_connect_now", &pq.Error{Code: pq.ErrorCode(pgerrcode.CannotConnectNow)}, true},
+		{"57014_query_canceled", &pq.Error{Code: pq.ErrorCode(pgerrcode.QueryCanceled)}, true},
+		{"53300_too_many_connections", &pq.Error{Code: pq.ErrorCode(pgerrcode.TooManyConnections)}, true},
+
+		{"23505_unique_violation", &pq.Error{Code: "23505"}, false},
+		{"53100_disk_full", &pq.Error{Code: "53100"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -485,6 +497,8 @@ DO UPDATE SET mtype=$2, value=EXCLUDED.value, delta=NULL, updated_at=now();`
 	mock.ExpectExec(qm(q)).WithArgs("Alloc", "gauge", 1.23).
 		WillReturnError(&pq.Error{Code: pq.ErrorCode(pgerrcode.ConnectionDoesNotExist)})
 	mock.ExpectExec(qm(q)).WithArgs("Alloc", "gauge", 1.23).
+		WillReturnError(&pq.Error{Code: pq.ErrorCode(pgerrcode.LockNotAvailable)})
+	mock.ExpectExec(qm(q)).WithArgs("Alloc", "gauge", 1.23).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	if err := st.SetGauge(context.Background(), "Alloc", 1.23); err != nil {
@@ -533,15 +547,19 @@ VALUES ($1, $2, NULL, $3, now())
 ON CONFLICT (id)
 DO UPDATE SET mtype=$2, value=NULL, delta=COALESCE(metrics.delta,0)+EXCLUDED.delta, updated_at=now();`
 
-	mock.ExpectBegin().WillReturnError(&pq.Error{Code: pq.ErrorCode(pgerrcode.ConnectionException)})
 	mock.ExpectBegin()
-	mock.ExpectExec(qm(qGauge)).WithArgs("g", "gauge", 3.14).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(qm(qCounter)).WithArgs("c", "counter", int64(7)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(qm(qGauge)).WithArgs("g", "gauge", 1.0).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(qm(qCounter)).WithArgs("c", "counter", int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit().WillReturnError(&pq.Error{Code: pq.ErrorCode(pgerrcode.SerializationFailure)})
+
+	mock.ExpectBegin()
+	mock.ExpectExec(qm(qGauge)).WithArgs("g", "gauge", 1.0).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(qm(qCounter)).WithArgs("c", "counter", int64(2)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	items := []domain.Metrics{
-		{ID: "g", MType: "gauge", Value: ptrFloat64(3.14)},
-		{ID: "c", MType: "counter", Delta: ptrInt64(7)},
+		{ID: "g", MType: "gauge", Value: ptrFloat64(1.0)},
+		{ID: "c", MType: "counter", Delta: ptrInt64(2)},
 	}
 	if err := st.UpdateMany(context.Background(), items); err != nil {
 		t.Fatalf("UpdateMany error: %v", err)

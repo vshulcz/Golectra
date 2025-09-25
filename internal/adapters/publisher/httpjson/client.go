@@ -63,65 +63,27 @@ func (c *Client) SendBatch(ctx context.Context, metrics []domain.Metrics) error 
 }
 
 func (c *Client) doGzJSON(ctx context.Context, path string, payload any) error {
-	var body []byte
-	if payload != nil {
-		b, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("marshal: %w", err)
-		}
-		body = b
-	}
-
-	var gz bytes.Buffer
-	zw := gzip.NewWriter(&gz)
-	if _, err := zw.Write(body); err != nil {
-		_ = zw.Close()
-		return fmt.Errorf("gzip write: %w", err)
-	}
-	if err := zw.Close(); err != nil {
-		return fmt.Errorf("gzip close: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(path), bytes.NewReader(gz.Bytes()))
+	plain, err := marshalJSON(payload)
 	if err != nil {
-		return fmt.Errorf("new request: %w", err)
+		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Accept-Encoding", "gzip")
-
-	var resp *http.Response
-	op := func() error {
-		r, err := c.hc.Do(req)
-		resp = r
-		if err != nil {
-			return err
-		}
-		return nil
+	gz, err := gzipBytes(plain)
+	if err != nil {
+		return err
 	}
-
-	if err := misc.Retry(ctx, misc.DefaultBackoff, isRetryableHTTP, op); err != nil {
-		return fmt.Errorf("http do: %w", err)
+	gzBody := gz.Bytes()
+	resp, err := c.sendWithRetry(ctx, func() (*http.Request, error) {
+		return c.newGzJSONRequest(ctx, path, gzBody)
+	})
+	if err != nil {
+		return err
 	}
 	defer resp.Body.Close()
 
-	var r io.Reader = resp.Body
-	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Encoding")), "gzip") {
-		gr, err := gzip.NewReader(resp.Body)
-		if err != nil {
-			return fmt.Errorf("bad gzip: %w", err)
-		}
-		defer gr.Close()
-		r = gr
-	}
-	io.Copy(io.Discard, r)
-
-	if resp.StatusCode != http.StatusOK {
-		err := &httpStatusError{code: resp.StatusCode, msg: fmt.Sprintf("server status: %s", resp.Status)}
+	if err := drainAndDiscard(resp); err != nil {
 		return err
 	}
-	return nil
+	return checkHTTPStatus(resp)
 }
 
 type httpStatusError struct {
@@ -158,4 +120,78 @@ func isRetryableHTTP(err error) bool {
 	return errors.Is(err, syscall.ECONNREFUSED) ||
 		errors.Is(err, syscall.ECONNRESET) ||
 		errors.Is(err, syscall.EPIPE)
+}
+
+func marshalJSON(payload any) ([]byte, error) {
+	if payload == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal: %w", err)
+	}
+	return b, nil
+}
+
+func gzipBytes(src []byte) (*bytes.Buffer, error) {
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write(src); err != nil {
+		_ = zw.Close()
+		return nil, fmt.Errorf("gzip write: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return nil, fmt.Errorf("gzip close: %w", err)
+	}
+	return &gz, nil
+}
+
+func (c *Client) newGzJSONRequest(ctx context.Context, path string, body []byte) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(path), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("new request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+	return req, nil
+}
+
+func (c *Client) sendWithRetry(ctx context.Context, mkReq func() (*http.Request, error)) (*http.Response, error) {
+	var resp *http.Response
+	op := func() error {
+		req, err := mkReq()
+		if err != nil {
+			return err
+		}
+		r, err := c.hc.Do(req)
+		resp = r
+		return err
+	}
+	if err := misc.Retry(ctx, misc.DefaultBackoff, isRetryableHTTP, op); err != nil {
+		return nil, fmt.Errorf("http do: %w", err)
+	}
+	return resp, nil
+}
+
+func drainAndDiscard(resp *http.Response) error {
+	var r io.Reader = resp.Body
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Encoding")), "gzip") {
+		gr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return fmt.Errorf("bad gzip: %w", err)
+		}
+		defer gr.Close()
+		r = gr
+	}
+	io.Copy(io.Discard, r)
+	return nil
+}
+
+func checkHTTPStatus(resp *http.Response) error {
+	if resp.StatusCode != http.StatusOK {
+		return &httpStatusError{code: resp.StatusCode, msg: fmt.Sprintf("server status: %s", resp.Status)}
+	}
+	return nil
 }
