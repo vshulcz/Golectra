@@ -1,44 +1,46 @@
 package main
 
 import (
-	"log"
-	"time"
+	"context"
+	"database/sql"
 
+	_ "github.com/lib/pq"
+	"go.uber.org/zap"
+
+	"github.com/vshulcz/Golectra/internal/adapters/persistance/file"
+	memrepo "github.com/vshulcz/Golectra/internal/adapters/repository/memory"
+	pgrepo "github.com/vshulcz/Golectra/internal/adapters/repository/postgres"
 	"github.com/vshulcz/Golectra/internal/config"
-	"github.com/vshulcz/Golectra/internal/store"
+	"github.com/vshulcz/Golectra/internal/misc"
+	"github.com/vshulcz/Golectra/internal/ports"
 )
 
-func initStorage(cfg config.ServerConfig) *store.MemStorage {
-	st := store.NewMemStorage()
-	if cfg.Restore {
-		if err := store.LoadFromFile(st, cfg.File); err != nil {
-			log.Printf("restore failed: %v", err)
-		} else {
-			log.Printf("restore ok from %s", cfg.File)
-		}
-	}
-	return st
-}
-
-func initPersistence(st store.Storage, h *Handler, cfg config.ServerConfig) {
-	switch {
-	case cfg.Interval == 0:
-		h.SetAfterUpdate(func() {
-			if err := store.SaveToFile(st, cfg.File); err != nil {
-				log.Printf("save sync failed: %v", err)
-			}
-		})
-	case cfg.Interval > 0:
-		if cfg.Interval < 0 {
-			cfg.Interval = 300 * time.Second
-		}
-		ticker := time.NewTicker(cfg.Interval)
-		go func() {
-			for range ticker.C {
-				if err := store.SaveToFile(st, cfg.File); err != nil {
-					log.Printf("save periodic failed: %v", err)
+func buildRepoAndPersister(cfg config.ServerConfig, logger *zap.Logger) (ports.MetricsRepo, ports.Persister) {
+	ctx := context.Background()
+	if cfg.DSN != "" {
+		db, err := sql.Open("postgres", cfg.DSN)
+		if err == nil {
+			op := func() error {
+				if err := db.Ping(); err != nil {
+					return err
 				}
+				return pgrepo.Migrate(db)
 			}
-		}()
+			if err = misc.Retry(ctx, misc.DefaultBackoff, pgrepo.IsRetryable, op); err == nil {
+				logger.Info("db connected & migrated")
+				return pgrepo.New(db), nil
+			}
+		}
+		logger.Warn("postgres init failed, falling back to memory", zap.Error(err))
 	}
+	repo := memrepo.New()
+	var p ports.Persister = file.New(cfg.File)
+	if cfg.Restore && p != nil {
+		if err := p.Restore(ctx, repo); err != nil {
+			logger.Warn("restore failed", zap.Error(err))
+		} else {
+			logger.Info("restore ok", zap.String("file", cfg.File))
+		}
+	}
+	return repo, p
 }

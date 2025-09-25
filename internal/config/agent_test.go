@@ -11,11 +11,11 @@ func d(sec int) time.Duration { return time.Duration(sec) * time.Second }
 
 func TestLoadAgentConfig(t *testing.T) {
 	tests := []struct {
-		name      string
-		args      []string
 		env       map[string]string
-		want      AgentConfig
+		name      string
 		wantError string
+		args      []string
+		want      AgentConfig
 	}{
 		{
 			name: "defaults",

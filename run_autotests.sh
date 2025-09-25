@@ -95,7 +95,7 @@ TMP=$(random_tempfile)
 ./metricstest -test.v -test.run=^TestIteration10[AB]$ \
   -agent-binary-path=cmd/agent/agent \
   -binary-path=cmd/server/server \
-  -database-dsn='postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable' \
+  -database-dsn='postgres://user:pass@127.0.0.1:5432/mydb?sslmode=disable' \
   -server-port=$PORT \
   -source-path=.
 
@@ -106,7 +106,7 @@ TMP=$(random_tempfile)
 ./metricstest -test.v -test.run=^TestIteration11$ \
   -agent-binary-path=cmd/agent/agent \
   -binary-path=cmd/server/server \
-  -database-dsn='postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable' \
+  -database-dsn='postgres://user:pass@127.0.0.1:5432/mydb?sslmode=disable' \
   -server-port=$PORT \
   -source-path=.
 
@@ -117,7 +117,7 @@ TMP=$(random_tempfile)
 ./metricstest -test.v -test.run=^TestIteration12$ \
   -agent-binary-path=cmd/agent/agent \
   -binary-path=cmd/server/server \
-  -database-dsn='postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable' \
+  -database-dsn='postgres://user:pass@127.0.0.1:5432/mydb?sslmode=disable' \
   -server-port=$PORT \
   -source-path=.
 
@@ -128,7 +128,7 @@ TMP=$(random_tempfile)
 ./metricstest -test.v -test.run=^TestIteration13$ \
   -agent-binary-path=cmd/agent/agent \
   -binary-path=cmd/server/server \
-  -database-dsn='postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable' \
+  -database-dsn='postgres://user:pass@127.0.0.1:5432/mydb?sslmode=disable' \
   -server-port=$PORT \
   -source-path=.
 
@@ -139,6 +139,6 @@ TMP=$(random_tempfile)
 ./metricstest -test.v -test.run=^TestIteration14$ \
   -agent-binary-path=cmd/agent/agent \
   -binary-path=cmd/server/server \
-  -database-dsn='postgres://postgres:postgres@localhost:5432/praktikum?sslmode=disable' \
+  -database-dsn='postgres://user:pass@127.0.0.1:5432/mydb?sslmode=disable' \
   -key="$TMP" \
   -serv
