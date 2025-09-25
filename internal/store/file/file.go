@@ -1,4 +1,4 @@
-package store
+package file
 
 import (
 	"encoding/json"
@@ -7,29 +7,30 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/vshulcz/Golectra/models"
+	"github.com/vshulcz/Golectra/internal/domain"
+	"github.com/vshulcz/Golectra/internal/store"
 )
 
-func SaveToFile(s Storage, path string) error {
+func SaveToFile(s store.Storage, path string) error {
 	g, c := s.Snapshot()
 
 	total := len(g) + len(c)
-	items := make([]models.Metrics, total)
+	items := make([]domain.Metrics, total)
 	i := 0
 	for k, v := range g {
 		vv := v
-		items[i] = models.Metrics{
+		items[i] = domain.Metrics{
 			ID:    k,
-			MType: string(models.Gauge),
+			MType: string(domain.Gauge),
 			Value: &vv,
 		}
 		i++
 	}
 	for k, d := range c {
 		dd := d
-		items[i] = models.Metrics{
+		items[i] = domain.Metrics{
 			ID:    k,
-			MType: string(models.Counter),
+			MType: string(domain.Counter),
 			Delta: &dd,
 		}
 		i++
@@ -74,7 +75,7 @@ func SaveToFile(s Storage, path string) error {
 	return nil
 }
 
-func LoadFromFile(s Storage, path string) error {
+func LoadFromFile(s store.Storage, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -84,18 +85,18 @@ func LoadFromFile(s Storage, path string) error {
 	}
 	defer f.Close()
 
-	var items []models.Metrics
+	var items []domain.Metrics
 	if err := json.NewDecoder(f).Decode(&items); err != nil {
 		return fmt.Errorf("decode: %w", err)
 	}
 
 	for _, m := range items {
 		switch m.MType {
-		case string(models.Gauge):
+		case string(domain.Gauge):
 			if m.Value != nil {
 				s.UpdateGauge(m.ID, *m.Value)
 			}
-		case string(models.Counter):
+		case string(domain.Counter):
 			if m.Delta != nil {
 				s.UpdateCounter(m.ID, *m.Delta)
 			}

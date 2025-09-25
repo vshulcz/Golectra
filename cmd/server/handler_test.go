@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,485 +10,353 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vshulcz/Golectra/internal/domain"
 	"github.com/vshulcz/Golectra/internal/store"
-	"github.com/vshulcz/Golectra/models"
+	"github.com/vshulcz/Golectra/internal/store/memory"
 	"go.uber.org/zap"
 )
 
-func TestHandler_UpdateMetric(t *testing.T) {
-	tests := []struct {
-		name          string
-		method        string
-		url           string
-		wantStatus    int
-		wantInGauge   map[string]float64
-		wantInCounter map[string]int64
-	}{
-		{
-			name:       "valid gauge",
-			method:     http.MethodPost,
-			url:        "/update/gauge/testGauge/123.4",
-			wantStatus: http.StatusOK,
-			wantInGauge: map[string]float64{
-				"testGauge": 123.4,
-			},
-		},
-		{
-			name:       "valid counter",
-			method:     http.MethodPost,
-			url:        "/update/counter/testCounter/42",
-			wantStatus: http.StatusOK,
-			wantInCounter: map[string]int64{
-				"testCounter": 42,
-			},
-		},
-		{
-			name:       "bad metric type",
-			method:     http.MethodPost,
-			url:        "/update/unknown/x/1",
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:       "bad gauge value",
-			method:     http.MethodPost,
-			url:        "/update/gauge/testGauge/not-a-number",
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:       "bad counter value",
-			method:     http.MethodPost,
-			url:        "/update/counter/testCounter/not-int",
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:       "missing name",
-			method:     http.MethodPost,
-			url:        "/update/gauge//123",
-			wantStatus: http.StatusNotFound,
-		},
-		{
-			name:       "wrong method",
-			method:     http.MethodGet,
-			url:        "/update/gauge/x/1",
-			wantStatus: http.StatusMethodNotAllowed,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			st := store.NewMemStorage()
-			h := NewHandler(st)
-
-			logger, _ := zap.NewProduction()
-			router := NewRouter(h, logger)
-
-			req := httptest.NewRequest(tt.method, tt.url, nil)
-			req.Header.Set("Content-Type", "text/plain")
-			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, req)
-
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("status = %d, want %d; body=%q", rec.Code, tt.wantStatus, rec.Body.String())
-			}
-
-			for k, v := range tt.wantInGauge {
-				got, ok := st.GetGauge(k)
-				if !ok {
-					t.Errorf("expected gauge %q to be set", k)
-				}
-				if got != v {
-					t.Errorf("gauge %q = %v, want %v", k, got, v)
-				}
-			}
-			for k, v := range tt.wantInCounter {
-				got, ok := st.GetCounter(k)
-				if !ok {
-					t.Errorf("expected counter %q to be set", k)
-				}
-				if got != v {
-					t.Errorf("counter %q = %v, want %v", k, got, v)
-				}
-			}
-		})
-	}
-}
-
-func TestHandler_GetValue_and_Index(t *testing.T) {
-	st := store.NewMemStorage()
-	h := NewHandler(st)
-
-	logger, _ := zap.NewProduction()
-	router := NewRouter(h, logger)
-
-	{
-		req := httptest.NewRequest(http.MethodPost, "/update/gauge/g1/10.5", nil)
-		req.Header.Set("Content-Type", "text/plain")
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("seed gauge failed, code=%d", rec.Code)
-		}
-	}
-	{
-		req := httptest.NewRequest(http.MethodPost, "/update/counter/c1/7", nil)
-		req.Header.Set("Content-Type", "text/plain")
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("seed counter failed, code=%d", rec.Code)
-		}
-	}
-
-	{
-		req := httptest.NewRequest(http.MethodGet, "/value/gauge/g1", nil)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET value gauge code=%d", rec.Code)
-		}
-		if got := strings.TrimSpace(rec.Body.String()); got != "10.5" {
-			t.Fatalf("GET value gauge body=%q, want %q", got, "10.5")
-		}
-	}
-
-	{
-		req := httptest.NewRequest(http.MethodGet, "/value/counter/c1", nil)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET value counter code=%d", rec.Code)
-		}
-		if got := strings.TrimSpace(rec.Body.String()); got != "7" {
-			t.Fatalf("GET value counter body=%q, want %q", got, "7")
-		}
-	}
-
-	{
-		req := httptest.NewRequest(http.MethodGet, "/value/gauge/unknown", nil)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("GET value unknown code=%d, want 404", rec.Code)
-		}
-	}
-
-	{
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET / code=%d", rec.Code)
-		}
-		ct := rec.Header().Get("Content-Type")
-		if !strings.HasPrefix(ct, "text/html") {
-			t.Fatalf("GET / content-type=%q, want text/html", ct)
-		}
-		body := rec.Body.String()
-		if !strings.Contains(body, "g1") || !strings.Contains(body, "10.5") {
-			t.Fatalf("GET / html does not contain expected metrics; body=%q", body)
-		}
-	}
-}
-
-func TestHandler_UpdateMetricJSON(t *testing.T) {
-	srv := newTestServerJSON(t)
-	defer srv.Close()
-
-	tests := []struct {
-		name       string
-		req        models.Metrics
-		wantCode   int
-		wantCTJSON bool
-		wantField  string
-		wantNum    float64
-	}{
-		{
-			name:       "gauge ok",
-			req:        func() models.Metrics { v := 123.45; return models.Metrics{ID: "Alloc", MType: "gauge", Value: &v} }(),
-			wantCode:   http.StatusOK,
-			wantCTJSON: true,
-			wantField:  "value",
-			wantNum:    123.45,
-		},
-		{
-			name: "counter ok (first delta=3 -> total=3)",
-			req: func() models.Metrics {
-				d := int64(3)
-				return models.Metrics{ID: "PollCount", MType: "counter", Delta: &d}
-			}(),
-			wantCode:   http.StatusOK,
-			wantCTJSON: true,
-			wantField:  "delta",
-			wantNum:    3,
-		},
-		{
-			name:     "bad: missing value for gauge",
-			req:      models.Metrics{ID: "X", MType: "gauge"},
-			wantCode: http.StatusBadRequest,
-		},
-		{
-			name:     "bad: missing delta for counter",
-			req:      models.Metrics{ID: "Y", MType: "counter"},
-			wantCode: http.StatusBadRequest,
-		},
-		{
-			name:     "bad: empty id",
-			req:      func() models.Metrics { v := 1.0; return models.Metrics{ID: "", MType: "gauge", Value: &v} }(),
-			wantCode: http.StatusBadRequest,
-		},
-		{
-			name:     "bad: unknown type",
-			req:      func() models.Metrics { v := 1.0; return models.Metrics{ID: "Z", MType: "weird", Value: &v} }(),
-			wantCode: http.StatusBadRequest,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			resp, data := doJSON(t, http.MethodPost, srv.URL+"/update", tc.req)
-			if resp.StatusCode != tc.wantCode {
-				t.Fatalf("status=%d want %d; body=%q", resp.StatusCode, tc.wantCode, string(data))
-			}
-			if tc.wantCTJSON {
-				ct := resp.Header.Get("Content-Type")
-				if !strings.HasPrefix(ct, "application/json") {
-					t.Fatalf("Content-Type=%q want application/json", ct)
-				}
-			}
-			if resp.StatusCode == http.StatusOK {
-				var got models.Metrics
-				if err := json.Unmarshal(data, &got); err != nil {
-					t.Fatalf("unmarshal: %v, body=%q", err, string(data))
-				}
-				switch tc.wantField {
-				case "value":
-					if got.Value == nil || *got.Value != tc.wantNum {
-						t.Fatalf("value=%v want %v", got.Value, tc.wantNum)
-					}
-				case "delta":
-					if got.Delta == nil || float64(*got.Delta) != tc.wantNum {
-						t.Fatalf("delta=%v want %v", got.Delta, tc.wantNum)
-					}
-				}
-			}
-		})
-	}
-
-	d := int64(4)
-	resp, data := doJSON(t, http.MethodPost, srv.URL+"/update",
-		models.Metrics{ID: "PollCount", MType: "counter", Delta: &d})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status=%d body=%q", resp.StatusCode, string(data))
-	}
-	var got models.Metrics
-	_ = json.Unmarshal(data, &got)
-	if got.Delta == nil || *got.Delta != 7 {
-		t.Fatalf("accumulated delta=%v want 7", got.Delta)
-	}
-}
-
-func TestHandler_GetMetricJSON(t *testing.T) {
-	srv := newTestServerJSON(t)
-	defer srv.Close()
-
-	{
-		v := 111.0
-		resp, _ := doJSON(t, http.MethodPost, srv.URL+"/update",
-			models.Metrics{ID: "LastGC", MType: "gauge", Value: &v})
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("seed gauge status=%d", resp.StatusCode)
-		}
-	}
-	{
-		d := int64(5)
-		resp, _ := doJSON(t, http.MethodPost, srv.URL+"/update",
-			models.Metrics{ID: "PollCount", MType: "counter", Delta: &d})
-		if resp.StatusCode != http.StatusOK {
-			t.Fatalf("seed counter status=%d", resp.StatusCode)
-		}
-	}
-
-	tests := []struct {
-		name     string
-		req      models.Metrics
-		wantCode int
-		check    func(t *testing.T, data []byte)
-	}{
-		{
-			name:     "value gauge ok",
-			req:      models.Metrics{ID: "LastGC", MType: "gauge"},
-			wantCode: http.StatusOK,
-			check: func(t *testing.T, data []byte) {
-				var got models.Metrics
-				if err := json.Unmarshal(data, &got); err != nil {
-					t.Fatalf("unmarshal: %v", err)
-				}
-				if got.Value == nil || *got.Value != 111 {
-					t.Fatalf("value=%v want 111", got.Value)
-				}
-			},
-		},
-		{
-			name:     "value counter ok",
-			req:      models.Metrics{ID: "PollCount", MType: "counter"},
-			wantCode: http.StatusOK,
-			check: func(t *testing.T, data []byte) {
-				var got models.Metrics
-				_ = json.Unmarshal(data, &got)
-				if got.Delta == nil || *got.Delta != 5 {
-					t.Fatalf("delta=%v want 5", got.Delta)
-				}
-			},
-		},
-		{
-			name:     "unknown id -> 404",
-			req:      models.Metrics{ID: "Nope", MType: "gauge"},
-			wantCode: http.StatusNotFound,
-		},
-		{
-			name:     "bad type -> 400",
-			req:      models.Metrics{ID: "LastGC", MType: "weird"},
-			wantCode: http.StatusBadRequest,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			resp, data := doJSON(t, http.MethodPost, srv.URL+"/value", tc.req)
-			if resp.StatusCode != tc.wantCode {
-				t.Fatalf("status=%d want %d; body=%q", resp.StatusCode, tc.wantCode, string(data))
-			}
-			if resp.StatusCode == http.StatusOK {
-				ct := resp.Header.Get("Content-Type")
-				if !strings.HasPrefix(ct, "application/json") {
-					t.Fatalf("Content-Type=%q want application/json", ct)
-				}
-				if tc.check != nil {
-					tc.check(t, data)
-				}
-			}
-		})
-	}
-}
-
-func newTestServerJSON(t *testing.T) *httptest.Server {
+func newServer(t *testing.T, st store.Storage) *httptest.Server {
 	t.Helper()
-	st := store.NewMemStorage()
 	h := NewHandler(st)
 	r := NewRouter(h, zap.NewNop())
 	return httptest.NewServer(r)
 }
 
-func doJSON(t *testing.T, method, url string, payload any) (*http.Response, []byte) {
+func doReq(t *testing.T, method, url string, body []byte, hdr map[string]string) (*http.Response, []byte) {
 	t.Helper()
-	var body io.Reader
-	if payload != nil {
-		b, err := json.Marshal(payload)
-		if err != nil {
-			t.Fatalf("marshal payload: %v", err)
-		}
-		body = bytes.NewReader(b)
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
 	}
-	req, err := http.NewRequest(method, url, body)
+	req, err := http.NewRequest(method, url, rd)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
+	for k, v := range hdr {
+		req.Header.Set(k, v)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("do: %v", err)
 	}
-	data, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
+	data := readMaybeGzip(t, resp)
 	return resp, data
 }
 
-func TestHandler_AfterUpdateCalled(t *testing.T) {
-	st := store.NewMemStorage()
-	h := NewHandler(st)
-
-	called := false
-	h.SetAfterUpdate(func() { called = true })
-
-	req := httptest.NewRequest(http.MethodPost, "/update/gauge/x/1.23", nil)
-	req.Header.Set("Content-Type", "text/plain")
-	rec := httptest.NewRecorder()
-
-	r := NewRouter(h, zap.NewNop())
-	r.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d, want 200", rec.Code)
+func readMaybeGzip(t *testing.T, resp *http.Response) []byte {
+	t.Helper()
+	defer resp.Body.Close()
+	var r io.Reader = resp.Body
+	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Encoding")), "gzip") {
+		zr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			t.Fatalf("gzip reader: %v", err)
+		}
+		defer zr.Close()
+		r = zr
 	}
-	if !called {
-		t.Fatalf("afterUpdate should have been called")
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
 	}
-
-	called = false
-	v := 5.5
-	reqJSON, _ := json.Marshal(models.Metrics{ID: "y", MType: "gauge", Value: &v})
-	req = httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(reqJSON))
-	req.Header.Set("Content-Type", "application/json")
-	rec = httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d, want 200", rec.Code)
-	}
-	if !called {
-		t.Fatalf("afterUpdate should have been called for JSON")
-	}
+	return b
 }
 
-func TestHandler_UpdateMetricJSON_BadPayloads(t *testing.T) {
-	st := store.NewMemStorage()
-	h := NewHandler(st)
-	r := NewRouter(h, zap.NewNop())
+func gzipBytes(t *testing.T, b []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(b); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	return buf.Bytes()
+}
 
-	tests := []struct {
-		name string
-		body string
-	}{
-		{"empty body", ""},
-		{"invalid json", "{"},
+func TestHTTP_PathAndHTML(t *testing.T) {
+	srv := newServer(t, memory.NewMemStorage())
+	defer srv.Close()
+
+	type tc struct {
+		name       string
+		method     string
+		path       string
+		hdr        map[string]string
+		bodySubstr string
+		wantCode   int
+		after      func(*testing.T)
+	}
+
+	tests := []tc{
+		{
+			name:     "update gauge ok",
+			method:   http.MethodPost,
+			path:     "/update/gauge/testGauge/123.4",
+			hdr:      map[string]string{"Content-Type": "text/plain"},
+			wantCode: http.StatusOK,
+		},
+		{
+			name:     "update counter ok",
+			method:   http.MethodPost,
+			path:     "/update/counter/testCounter/42",
+			hdr:      map[string]string{"Content-Type": "text/plain"},
+			wantCode: http.StatusOK,
+		},
+		{
+			name:     "update bad type",
+			method:   http.MethodPost,
+			path:     "/update/unknown/x/1",
+			hdr:      map[string]string{"Content-Type": "text/plain"},
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "update gauge bad value",
+			method:   http.MethodPost,
+			path:     "/update/gauge/testGauge/not-a-number",
+			hdr:      map[string]string{"Content-Type": "text/plain"},
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "update counter bad value",
+			method:   http.MethodPost,
+			path:     "/update/counter/testCounter/not-int",
+			hdr:      map[string]string{"Content-Type": "text/plain"},
+			wantCode: http.StatusBadRequest,
+		},
+		{
+			name:     "update missing name",
+			method:   http.MethodPost,
+			path:     "/update/gauge//123",
+			hdr:      map[string]string{"Content-Type": "text/plain"},
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:     "wrong method for update",
+			method:   http.MethodGet,
+			path:     "/update/gauge/x/1",
+			wantCode: http.StatusMethodNotAllowed,
+		},
+		{
+			name:   "seed gauge",
+			method: http.MethodPost, path: "/update/gauge/g1/10.5",
+			hdr:      map[string]string{"Content-Type": "text/plain"},
+			wantCode: http.StatusOK,
+		},
+		{
+			name:   "get gauge ok",
+			method: http.MethodGet, path: "/value/gauge/g1",
+			wantCode: http.StatusOK, bodySubstr: "10.5",
+		},
+		{
+			name:   "seed counter",
+			method: http.MethodPost, path: "/update/counter/c1/7",
+			hdr:      map[string]string{"Content-Type": "text/plain"},
+			wantCode: http.StatusOK,
+		},
+		{
+			name:   "get counter ok",
+			method: http.MethodGet, path: "/value/counter/c1",
+			wantCode: http.StatusOK, bodySubstr: "7",
+		},
+		{
+			name:   "get unknown -> 404",
+			method: http.MethodGet, path: "/value/gauge/unknown",
+			wantCode: http.StatusNotFound,
+		},
+		{
+			name:   "index html (gzipped)",
+			method: http.MethodGet, path: "/",
+			hdr:      map[string]string{"Accept-Encoding": "gzip"},
+			wantCode: http.StatusOK,
+			after: func(t *testing.T) {
+				resp, body := doReq(t, http.MethodGet, srv.URL+"/", nil, map[string]string{"Accept-Encoding": "gzip"})
+				if ce := resp.Header.Get("Content-Encoding"); !strings.Contains(strings.ToLower(ce), "gzip") {
+					t.Fatalf("html Content-Encoding=%q want gzip", ce)
+				}
+				if ct := http.DetectContentType(body); !strings.HasPrefix(ct, "text/html") {
+					t.Fatalf("html content-type detect=%q", ct)
+				}
+				if !strings.Contains(string(body), "g1") || !strings.Contains(string(body), "10.5") {
+					t.Fatalf("html body missing seeded metrics")
+				}
+			},
+		},
+		{
+			name:   "404 should not be gzipped",
+			method: http.MethodGet, path: "/unknown",
+			hdr:      map[string]string{"Accept-Encoding": "gzip"},
+			wantCode: http.StatusNotFound,
+			after: func(t *testing.T) {
+				resp, _ := doReq(t, http.MethodGet, srv.URL+"/unknown", nil, map[string]string{"Accept-Encoding": "gzip"})
+				if ce := resp.Header.Get("Content-Encoding"); ce != "" {
+					t.Fatalf("404 must not be gzipped, got %q", ce)
+				}
+			},
+		},
 	}
 
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/update", strings.NewReader(tc.body))
-			req.Header.Set("Content-Type", "application/json")
-			rec := httptest.NewRecorder()
-			r.ServeHTTP(rec, req)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status=%d, want 400", rec.Code)
+			resp, body := doReq(t, tc.method, srv.URL+tc.path, nil, tc.hdr)
+			if resp.StatusCode != tc.wantCode {
+				t.Fatalf("status=%d want %d; body=%q", resp.StatusCode, tc.wantCode, string(body))
+			}
+			if tc.bodySubstr != "" && !strings.Contains(string(body), tc.bodySubstr) {
+				t.Fatalf("body %q does not contain %q", string(body), tc.bodySubstr)
+			}
+			if tc.after != nil {
+				tc.after(t)
 			}
 		})
 	}
 }
 
-func TestHandler_GetMetricJSON_BadPayloads(t *testing.T) {
-	st := store.NewMemStorage()
-	h := NewHandler(st)
-	r := NewRouter(h, zap.NewNop())
+func TestHTTP_JSON(t *testing.T) {
+	srv := newServer(t, memory.NewMemStorage())
+	defer srv.Close()
 
-	tests := []struct {
-		name string
-		body string
-	}{
-		{"empty body", ""},
-		{"invalid json", "{"},
+	type jtc struct {
+		name     string
+		urlPath  string
+		payload  domain.Metrics
+		gzipReq  bool
+		wantCode int
+		wantJSON func(t *testing.T, b []byte)
+		wantGzip bool
 	}
 
-	for _, tc := range tests {
+	val := func(f float64) *float64 { return &f }
+	dlt := func(i int64) *int64 { return &i }
+
+	cases := []jtc{
+		{"update gauge ok", "/update", domain.Metrics{ID: "Alloc", MType: "gauge", Value: val(123.45)}, false, http.StatusOK,
+			func(t *testing.T, b []byte) {
+				var got domain.Metrics
+				_ = json.Unmarshal(b, &got)
+				if got.Value == nil || *got.Value != 123.45 {
+					t.Fatalf("got=%+v", got)
+				}
+			}, false},
+		{"update counter ok", "/update", domain.Metrics{ID: "PollCount", MType: "counter", Delta: dlt(3)}, false, http.StatusOK,
+			func(t *testing.T, b []byte) {
+				var got domain.Metrics
+				_ = json.Unmarshal(b, &got)
+				if got.Delta == nil || *got.Delta != 3 {
+					t.Fatalf("got=%+v", got)
+				}
+			}, false},
+
+		{"update bad: missing value for gauge", "/update", domain.Metrics{ID: "X", MType: "gauge"}, false, http.StatusBadRequest, nil, false},
+		{"update bad: missing delta for counter", "/update", domain.Metrics{ID: "Y", MType: "counter"}, false, http.StatusBadRequest, nil, false},
+		{"update bad: empty id", "/update", domain.Metrics{ID: "", MType: "gauge", Value: val(1)}, false, http.StatusBadRequest, nil, false},
+		{"update bad: unknown type", "/update", domain.Metrics{ID: "Z", MType: "weird", Value: val(1)}, false, http.StatusBadRequest, nil, false},
+
+		{"update accepts gzip body", "/update", domain.Metrics{ID: "LastGC", MType: "gauge", Value: val(777)}, true, http.StatusOK,
+			func(t *testing.T, b []byte) {
+				var got domain.Metrics
+				_ = json.Unmarshal(b, &got)
+				if got.Value == nil || *got.Value != 777 {
+					t.Fatalf("got=%+v", got)
+				}
+			}, false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/value", strings.NewReader(tc.body))
-			req.Header.Set("Content-Type", "application/json")
-			rec := httptest.NewRecorder()
-			r.ServeHTTP(rec, req)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status=%d, want 400", rec.Code)
+			b, _ := json.Marshal(tc.payload)
+			h := map[string]string{"Content-Type": "application/json", "Accept": "application/json"}
+			if tc.gzipReq {
+				b = gzipBytes(t, b)
+				h["Content-Encoding"] = "gzip"
+			}
+			resp, body := doReq(t, http.MethodPost, srv.URL+tc.urlPath, b, h)
+			if resp.StatusCode != tc.wantCode {
+				t.Fatalf("status=%d want %d; body=%q", resp.StatusCode, tc.wantCode, string(body))
+			}
+			if ct := resp.Header.Get("Content-Type"); resp.StatusCode == http.StatusOK && !strings.HasPrefix(ct, "application/json") {
+				t.Fatalf("Content-Type=%q want application/json", ct)
+			}
+			if tc.wantJSON != nil {
+				tc.wantJSON(t, body)
 			}
 		})
 	}
+	{
+		b, _ := json.Marshal(domain.Metrics{ID: "PollCount", MType: "counter", Delta: dlt(4)})
+		resp, body := doReq(t, http.MethodPost, srv.URL+"/update", b, map[string]string{"Content-Type": "application/json"})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d body=%q", resp.StatusCode, string(body))
+		}
+		var got domain.Metrics
+		_ = json.Unmarshal(body, &got)
+		if got.Delta == nil || *got.Delta != 7 {
+			t.Fatalf("accumulated delta=%v want 7", got.Delta)
+		}
+	}
+	{
+		q, _ := json.Marshal(domain.Metrics{ID: "Alloc", MType: "gauge"})
+		resp, body := doReq(t, http.MethodPost, srv.URL+"/value", q,
+			map[string]string{"Content-Type": "application/json", "Accept-Encoding": "gzip"})
+		if ce := resp.Header.Get("Content-Encoding"); !strings.Contains(strings.ToLower(ce), "gzip") {
+			t.Fatalf("Content-Encoding=%q want gzip", ce)
+		}
+		var got domain.Metrics
+		_ = json.Unmarshal(body, &got)
+		if got.Value == nil || *got.Value != 123.45 {
+			t.Fatalf("got=%+v", got)
+		}
+	}
+	resp, _ := doReq(t, http.MethodPost, srv.URL+"/value", mustJSON(domain.Metrics{ID: "Nope", MType: "gauge"}),
+		map[string]string{"Content-Type": "application/json"})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("want 404, got %d", resp.StatusCode)
+	}
+	resp, _ = doReq(t, http.MethodPost, srv.URL+"/value", mustJSON(domain.Metrics{ID: "Alloc", MType: "weird"}),
+		map[string]string{"Content-Type": "application/json"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d", resp.StatusCode)
+	}
+
+	resp, _ = doReq(t, http.MethodPost, srv.URL+"/update", nil, map[string]string{"Content-Type": "application/json"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty body: want 400, got %d", resp.StatusCode)
+	}
+	resp, _ = doReq(t, http.MethodPost, srv.URL+"/value", []byte("{"), map[string]string{"Content-Type": "application/json"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid json: want 400, got %d", resp.StatusCode)
+	}
+}
+
+func mustJSON(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
+}
+
+type pingOKStorage struct{ store.Storage }
+
+func (p *pingOKStorage) Ping() error { return nil }
+
+func TestHTTP_Ping(t *testing.T) {
+	t.Run("mem storage -> 500 (db not configured)", func(t *testing.T) {
+		srv := newServer(t, memory.NewMemStorage())
+		defer srv.Close()
+		resp, _ := doReq(t, http.MethodGet, srv.URL+"/ping", nil, nil)
+		if resp.StatusCode != http.StatusInternalServerError {
+			t.Fatalf("status=%d want 500", resp.StatusCode)
+		}
+	})
+
+	t.Run("ok when storage.Ping()==nil", func(t *testing.T) {
+		srv := newServer(t, &pingOKStorage{Storage: memory.NewMemStorage()})
+		defer srv.Close()
+		resp, _ := doReq(t, http.MethodGet, srv.URL+"/ping", nil, nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d want 200", resp.StatusCode)
+		}
+	})
 }

@@ -9,36 +9,49 @@ import (
 
 	"github.com/vshulcz/Golectra/internal/config"
 	"github.com/vshulcz/Golectra/internal/store"
+	"github.com/vshulcz/Golectra/internal/store/file"
+	"github.com/vshulcz/Golectra/internal/store/memory"
+	"github.com/vshulcz/Golectra/internal/store/postgres"
 )
 
 func initStorage(cfg config.ServerConfig) store.Storage {
-	base := store.NewMemStorage()
+	if cfg.DSN != "" {
+		db, err := sql.Open("postgres", cfg.DSN)
+		if err != nil {
+			log.Printf("db open error: %v", err)
+		} else {
+			if err := db.Ping(); err != nil {
+				log.Printf("db ping failed: %v", err)
+			} else if err := postgres.Migrate(db); err != nil {
+				log.Printf("db migrate failed: %v", err)
+			} else {
+				log.Printf("db connected & migrated")
+				return postgres.NewSQLStorage(db)
+			}
+		}
+	}
+
+	base := memory.NewMemStorage()
 	if cfg.Restore {
-		if err := store.LoadFromFile(base, cfg.File); err != nil {
+		if err := file.LoadFromFile(base, cfg.File); err != nil {
 			log.Printf("restore failed: %v", err)
 		} else {
 			log.Printf("restore ok from %s", cfg.File)
 		}
 	}
 
-	if cfg.DSN == "" {
-		return base
-	}
-
-	db, err := sql.Open("postgres", cfg.DSN)
-	if err != nil {
-		log.Printf("db open error: %v", err)
-		return base
-	}
-
-	return store.NewSQLStorage(base, db)
+	return base
 }
 
 func initPersistence(st store.Storage, h *Handler, cfg config.ServerConfig) {
+	if _, ok := st.(*postgres.SQLStorage); ok {
+		return
+	}
+
 	switch {
 	case cfg.Interval == 0:
 		h.SetAfterUpdate(func() {
-			if err := store.SaveToFile(st, cfg.File); err != nil {
+			if err := file.SaveToFile(st, cfg.File); err != nil {
 				log.Printf("save sync failed: %v", err)
 			}
 		})
@@ -49,7 +62,7 @@ func initPersistence(st store.Storage, h *Handler, cfg config.ServerConfig) {
 		ticker := time.NewTicker(cfg.Interval)
 		go func() {
 			for range ticker.C {
-				if err := store.SaveToFile(st, cfg.File); err != nil {
+				if err := file.SaveToFile(st, cfg.File); err != nil {
 					log.Printf("save periodic failed: %v", err)
 				}
 			}
