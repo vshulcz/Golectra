@@ -10,11 +10,11 @@ func ds(sec int) time.Duration { return time.Duration(sec) * time.Second }
 
 func TestLoadServerConfig(t *testing.T) {
 	tests := []struct {
-		name    string
-		args    []string
 		env     map[string]string
-		want    ServerConfig
+		name    string
 		wantErr string
+		args    []string
+		want    ServerConfig
 	}{
 		{
 			name: "defaults",
