@@ -186,7 +186,7 @@ func TestMemStorage(t *testing.T) {
 
 			for i := range 10 {
 				wg.Add(1)
-				go func(i int) {
+				func(i int) {
 					defer wg.Done()
 					ms.SetGauge(context.TODO(), "g", float64(i))
 					ms.AddCounter(context.TODO(), "c", int64(i))

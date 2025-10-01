@@ -28,7 +28,7 @@ func TestLoadServerConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "flags override env",
+			name: "env override flags",
 			args: []string{"-a", "http://127.0.0.1:9090", "-i", "42", "-f", "flags.json", "-r"},
 			env: map[string]string{
 				"ADDRESS":           "0.0.0.0:1234",
@@ -37,14 +37,14 @@ func TestLoadServerConfig(t *testing.T) {
 				"RESTORE":           "false",
 			},
 			want: ServerConfig{
-				Address:  "127.0.0.1:9090",
-				File:     "flags.json",
-				Interval: 42 * time.Second,
-				Restore:  true,
+				Address:  "0.0.0.0:1234",
+				File:     "env.json",
+				Interval: 777 * time.Second,
+				Restore:  false,
 			},
 		},
 		{
-			name: "env fallback (no flags)",
+			name: "env (no flags)",
 			args: []string{},
 			env: map[string]string{
 				"ADDRESS":           "http://0.0.0.0:5050",
@@ -81,7 +81,7 @@ func TestLoadServerConfig(t *testing.T) {
 			},
 		},
 		{
-			name: "restore comes from ENV when flag not set",
+			name: "restore comes from ENV",
 			args: []string{},
 			env:  map[string]string{"RESTORE": "true"},
 			want: ServerConfig{

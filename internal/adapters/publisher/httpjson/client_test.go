@@ -41,7 +41,7 @@ func TestNew_NormalizeBaseAndTimeout(t *testing.T) {
 			if !tc.nilHC {
 				hc = &http.Client{}
 			}
-			c, err := New(tc.addr, hc)
+			c, err := New(tc.addr, hc, "")
 			if err != nil {
 				t.Fatalf("New error: %v", err)
 			}
@@ -75,14 +75,14 @@ func Test_normalizeBase(t *testing.T) {
 }
 
 func TestNew_InvalidURL(t *testing.T) {
-	_, err := New("http://%zz", nil)
+	_, err := New("http://%zz", nil, "")
 	if err == nil {
 		t.Fatal("expected error for invalid URL")
 	}
 }
 
 func TestClient_JoinPath(t *testing.T) {
-	c, err := New("http://x:1/base", nil)
+	c, err := New("http://x:1/base", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestClient_JoinPath(t *testing.T) {
 		t.Fatalf("endpoint=%q want %q", got, "http://x:1/base/update")
 	}
 
-	c2, _ := New("http://x:1/base/", nil)
+	c2, _ := New("http://x:1/base/", nil, "")
 	if got := c2.endpoint("/update"); got != "http://x:1/base/update" {
 		t.Fatalf("endpoint=%q want %q", got, "http://x:1/base/update")
 	}
@@ -124,8 +124,8 @@ func TestSendOne_VariousResponses(t *testing.T) {
 			serverReply: func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Encoding", "gzip")
 				zw := gzip.NewWriter(w)
-				_, _ = zw.Write([]byte("ok"))
-				_ = zw.Close()
+				zw.Write([]byte("ok"))
+				zw.Close()
 			},
 		},
 		{
@@ -184,7 +184,7 @@ func TestSendOne_VariousResponses(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, &http.Client{Timeout: 2 * time.Second})
+			c, err := New(srv.URL, &http.Client{Timeout: 2 * time.Second}, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -256,7 +256,7 @@ func TestSendOne_CounterPayloadAndHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c, err := New(srv.URL, nil)
+	c, err := New(srv.URL, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,8 +305,8 @@ func TestSendBatch_VariousResponses(t *testing.T) {
 			serverReply: func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Encoding", "gzip")
 				zw := gzip.NewWriter(w)
-				_, _ = zw.Write([]byte("ok"))
-				_ = zw.Close()
+				zw.Write([]byte("ok"))
+				zw.Close()
 			},
 		},
 		{
@@ -365,7 +365,7 @@ func TestSendBatch_VariousResponses(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			c, err := New(srv.URL, &http.Client{Timeout: 2 * time.Second})
+			c, err := New(srv.URL, &http.Client{Timeout: 2 * time.Second}, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -441,7 +441,7 @@ func (panicRT) RoundTrip(*http.Request) (*http.Response, error) {
 
 func TestSendBatch_EmptyBatchIsNoop(t *testing.T) {
 	hc := &http.Client{Transport: panicRT{}, Timeout: time.Second}
-	c, err := New("http://example", hc)
+	c, err := New("http://example", hc, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +545,7 @@ func TestSendOne_RetryOnNetworkErrors(t *testing.T) {
 		},
 	}
 	hc := &http.Client{Transport: rt, Timeout: 2 * time.Second}
-	c, err := New("http://example", hc)
+	c, err := New("http://example", hc, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +572,7 @@ func TestSendOne_RetryExhausted(t *testing.T) {
 		},
 	}
 	hc := &http.Client{Transport: rt, Timeout: 2 * time.Second}
-	c, _ := New("http://example", hc)
+	c, _ := New("http://example", hc, "")
 
 	val := 1.0
 	err := c.SendOne(context.Background(), domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val})
@@ -595,7 +595,7 @@ func TestSendOne_NoRetry(t *testing.T) {
 		},
 	}
 	hc := &http.Client{Transport: rt}
-	c, _ := New("http://example", hc)
+	c, _ := New("http://example", hc, "")
 
 	val := 7.0
 	err := c.SendOne(context.Background(), domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val})
@@ -620,7 +620,7 @@ func TestSendOne_NoRetryOn400(t *testing.T) {
 		},
 	}
 	hc := &http.Client{Transport: rt}
-	c, _ := New("http://example", hc)
+	c, _ := New("http://example", hc, "")
 
 	val := 3.14
 	err := c.SendOne(context.Background(), domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val})
@@ -644,7 +644,7 @@ func TestSendBatch_Retry(t *testing.T) {
 		},
 	}
 	hc := &http.Client{Transport: rt}
-	c, _ := New("http://example", hc)
+	c, _ := New("http://example", hc, "")
 
 	val := 1.23
 	delta := int64(7)
@@ -673,7 +673,7 @@ func TestSendOne_ContextCancel(t *testing.T) {
 		},
 	}
 	hc := &http.Client{Transport: rt}
-	c, _ := New("http://example", hc)
+	c, _ := New("http://example", hc, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
@@ -696,14 +696,14 @@ func TestSendOne_ServerGzipResponse(t *testing.T) {
 				h.Set("Content-Encoding", "gzip")
 				var b strings.Builder
 				zw := gzip.NewWriter(&nopWriteCloser{&b})
-				_, _ = zw.Write([]byte("ok"))
-				_ = zw.Close()
+				zw.Write([]byte("ok"))
+				zw.Close()
 				return mkResp(http.StatusOK, b.String(), h), nil
 			},
 		},
 	}
 	hc := &http.Client{Transport: rt}
-	c, _ := New("http://example", hc)
+	c, _ := New("http://example", hc, "")
 
 	val := 1.0
 	if err := c.SendOne(context.Background(), domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val}); err != nil {
@@ -711,7 +711,118 @@ func TestSendOne_ServerGzipResponse(t *testing.T) {
 	}
 }
 
+func TestSendOne_NoHashHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method=%s want POST", r.Method)
+		}
+		if r.URL.Path != "/update" {
+			t.Errorf("path=%q want /update", r.URL.Path)
+		}
+
+		h := r.Header.Get("HashSHA256")
+		if h != "" {
+			t.Fatalf("expected no HashSHA256 header, got %q", h)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	val := 3.14
+	if err := c.SendOne(context.Background(), domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val}); err != nil {
+		t.Fatalf("SendOne error: %v", err)
+	}
+}
+
+func TestSendOne_HashHeader_Present(t *testing.T) {
+	key := "secret-key"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method=%s want POST", r.Method)
+		}
+		if r.URL.Path != "/update" {
+			t.Errorf("path=%q want /update", r.URL.Path)
+		}
+
+		h := r.Header.Get("HashSHA256")
+		if h == "" {
+			t.Fatal("expected HashSHA256 header to be present")
+		}
+
+		gr, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Fatalf("request not gzipped: %v", err)
+		}
+		defer gr.Close()
+		raw, _ := io.ReadAll(gr)
+
+		expected := misc.SumSHA256(raw, key)
+		if h != expected {
+			t.Fatalf("HashSHA256=%q want %q", h, expected)
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, nil, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	val := 2.71
+	if err := c.SendOne(context.Background(), domain.Metrics{ID: "Alloc", MType: "gauge", Value: &val}); err != nil {
+		t.Fatalf("SendOne error: %v", err)
+	}
+}
+
+func TestSendBatch_HashHeader_Present(t *testing.T) {
+	key := "batch-key"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method=%s want POST", r.Method)
+		}
+		if r.URL.Path != "/updates" {
+			t.Errorf("path=%q want /updates", r.URL.Path)
+		}
+
+		h := r.Header.Get("HashSHA256")
+		if h == "" {
+			t.Fatal("expected HashSHA256 header to be present")
+		}
+
+		gr, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Fatalf("request not gzipped: %v", err)
+		}
+		defer gr.Close()
+		raw, _ := io.ReadAll(gr)
+
+		expected := misc.SumSHA256(raw, key)
+		if h != expected {
+			t.Fatalf("HashSHA256=%q want %q", h, expected)
+		}
+
+		var ms []domain.Metrics
+		if err := json.Unmarshal(raw, &ms); err != nil {
+			t.Fatalf("bad json: %v", err)
+		}
+		if len(ms) != 2 {
+			t.Fatalf("want 2 metrics, got %d", len(ms))
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+}
+
 type nopWriteCloser struct{ *strings.Builder }
 
 func (n *nopWriteCloser) Write(p []byte) (int, error) { return n.Builder.Write(p) }
-func (n *nopWriteCloser) Close() error                { return nil }
+func (*nopWriteCloser) Close() error                  { return nil }

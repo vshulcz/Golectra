@@ -118,6 +118,7 @@ func (r *fakeRepo) UpdateMany(_ context.Context, items []domain.Metrics) error {
 			if it.Delta != nil {
 				r.counters[it.ID] += *it.Delta
 			}
+		default:
 		}
 	}
 	return nil
@@ -200,7 +201,7 @@ func TestService_Get(t *testing.T) {
 				t.Fatalf("err=%v want %v", err, tc.wantErr)
 			}
 			if tc.wantOK {
-				if m.ID != stringsTrim(tc.id) || m.MType != tc.typ {
+				if m.MType != tc.typ || m.ID != stringsTrim(tc.id) {
 					t.Fatalf("returned %+v mismatch id/type", m)
 				}
 				if tc.typ == string(domain.Gauge) {
@@ -271,6 +272,7 @@ func TestService_Upsert(t *testing.T) {
 					if got.Delta == nil || *got.Delta != repo.counters[tc.m.ID] || got.MType != string(domain.Counter) {
 						t.Fatalf("returned %+v mismatch counter", got)
 					}
+				default:
 				}
 			}
 		})
@@ -314,10 +316,10 @@ func TestService_UpsertBatch(t *testing.T) {
 			t.Fatalf("n=%d err=%v want 0, ErrInvalidType", n, err)
 		}
 		if len(repo.updateManyCalls) != 0 {
-			t.Fatalf("UpdateMany should not be called")
+			t.Fatal("UpdateMany should not be called")
 		}
 		if cbCalls != 0 {
-			t.Fatalf("onChanged should not be called")
+			t.Fatal("onChanged should not be called")
 		}
 	})
 
@@ -357,7 +359,7 @@ func TestService_UpsertBatch(t *testing.T) {
 			t.Fatalf("n=%d err=%v want 0, fail", n, err)
 		}
 		if cbCalls != 0 {
-			t.Fatalf("onChanged should not be called")
+			t.Fatal("onChanged should not be called")
 		}
 	})
 
@@ -375,7 +377,7 @@ func TestService_UpsertBatch(t *testing.T) {
 		cbMu.Lock()
 		defer cbMu.Unlock()
 		if cbCalls != 0 {
-			t.Fatalf("onChanged should not be called when snapshot fails")
+			t.Fatal("onChanged should not be called when snapshot fails")
 		}
 	})
 }

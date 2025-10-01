@@ -19,11 +19,12 @@ const (
 
 type AgentConfig struct {
 	Address        string
+	Key            string
 	PollInterval   time.Duration
 	ReportInterval time.Duration
 }
 
-// CLI > ENV > defaults
+// ENV > CLI > defaults
 func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 	if out == nil {
 		out = io.Discard
@@ -33,10 +34,12 @@ func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 	fs.SetOutput(out)
 
 	var addrOpt string
+	var keyOpt string
 	var reportOpt int
 	var pollOpt int
 
 	fs.StringVar(&addrOpt, "a", "", fmt.Sprintf("server address (host:port or URL), default: %s", defaultServerAddr))
+	fs.StringVar(&keyOpt, "k", "", "secret key for HashSHA256 header")
 	fs.IntVar(&reportOpt, "r", 0, fmt.Sprintf("report interval in seconds, default: %d", defaultReportInterval))
 	fs.IntVar(&pollOpt, "p", 0, fmt.Sprintf("poll interval in seconds, default: %d", defaultPollInterval))
 
@@ -44,40 +47,50 @@ func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 		return AgentConfig{}, err
 	}
 
-	addr := addrOpt
-	if strings.TrimSpace(addr) == "" {
-		addr = misc.Getenv("ADDRESS", defaultServerAddr)
+	addr := strings.TrimSpace(misc.Getenv("ADDRESS", ""))
+	if addr == "" {
+		addr = strings.TrimSpace(addrOpt)
+	}
+	if addr == "" {
+		addr = defaultServerAddr
 	}
 	addr = normalizeAddressURL(addr)
-
 	if _, err := url.ParseRequestURI(addr); err != nil {
 		return AgentConfig{}, fmt.Errorf("invalid server address: %q", addr)
 	}
 
-	var report time.Duration
-	if reportOpt > 0 {
-		report = time.Duration(reportOpt) * time.Second
-	} else {
-		report = misc.GetDuration("REPORT_INTERVAL", time.Duration(defaultReportInterval)*time.Second)
+	key := strings.TrimSpace(misc.Getenv("KEY", ""))
+	if key == "" {
+		key = strings.TrimSpace(keyOpt)
 	}
 
+	report := misc.GetDuration("REPORT_INTERVAL", 0)
+	if v := report; v == 0 && strings.TrimSpace(misc.Getenv("REPORT_INTERVAL", "")) == "" {
+		if reportOpt > 0 {
+			report = time.Duration(reportOpt) * time.Second
+		} else {
+			report = time.Duration(defaultReportInterval) * time.Second
+		}
+	}
 	if report <= 0 {
 		return AgentConfig{}, fmt.Errorf("report interval must be > 0, got %v", report)
 	}
 
-	var poll time.Duration
-	if pollOpt > 0 {
-		poll = time.Duration(pollOpt) * time.Second
-	} else {
-		poll = misc.GetDuration("POLL_INTERVAL", time.Duration(defaultPollInterval)*time.Second)
+	poll := misc.GetDuration("POLL_INTERVAL", 0)
+	if v := poll; v == 0 && strings.TrimSpace(misc.Getenv("POLL_INTERVAL", "")) == "" {
+		if pollOpt > 0 {
+			poll = time.Duration(pollOpt) * time.Second
+		} else {
+			poll = time.Duration(defaultPollInterval) * time.Second
+		}
 	}
-
 	if poll <= 0 {
 		return AgentConfig{}, fmt.Errorf("poll interval must be > 0, got %v", poll)
 	}
 
 	return AgentConfig{
 		Address:        addr,
+		Key:            key,
 		PollInterval:   poll,
 		ReportInterval: report,
 	}, nil

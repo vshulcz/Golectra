@@ -26,7 +26,7 @@ func (g *gzipReadCloser) Close() error {
 	return nil
 }
 
-func GunzipRequest() gin.HandlerFunc {
+func GzipRequest() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if enc := strings.ToLower(c.GetHeader("Content-Encoding")); strings.Contains(enc, "gzip") {
 			gr, err := gzip.NewReader(c.Request.Body)
@@ -104,6 +104,6 @@ func GzipResponse() gin.HandlerFunc {
 		grw := &gzipResponseWriter{ResponseWriter: c.Writer, acceptGzip: true}
 		c.Writer = grw
 		c.Next()
-		_ = grw.Close()
+		grw.Close()
 	}
 }
