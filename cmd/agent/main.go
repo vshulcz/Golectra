@@ -20,7 +20,7 @@ func main() {
 		log.Fatalf("failed to parse flags: %v", err)
 	}
 
-	pub, err := httpjson.New(cfg.Address, &http.Client{})
+	pub, err := httpjson.New(cfg.Address, &http.Client{}, cfg.Key)
 	if err != nil {
 		log.Fatalf("failed to init publisher: %v", err)
 	}

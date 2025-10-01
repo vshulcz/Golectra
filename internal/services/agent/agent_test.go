@@ -165,6 +165,7 @@ func TestService_reportOnce(t *testing.T) {
 						if m.Delta == nil || m.Value != nil {
 							t.Fatalf("counter id=%q payload mismatch: %+v", id, m)
 						}
+					default:
 					}
 				}
 			}
