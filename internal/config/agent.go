@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ const (
 	defaultServerAddr     = "http://localhost:8080"
 	defaultReportInterval = 10
 	defaultPollInterval   = 2
+	defaultRateLimit      = 1
 )
 
 type AgentConfig struct {
@@ -22,6 +24,7 @@ type AgentConfig struct {
 	Key            string
 	PollInterval   time.Duration
 	ReportInterval time.Duration
+	RateLimit      int
 }
 
 // ENV > CLI > defaults
@@ -37,11 +40,13 @@ func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 	var keyOpt string
 	var reportOpt int
 	var pollOpt int
+	var limitOpt int
 
 	fs.StringVar(&addrOpt, "a", "", fmt.Sprintf("server address (host:port or URL), default: %s", defaultServerAddr))
 	fs.StringVar(&keyOpt, "k", "", "secret key for HashSHA256 header")
 	fs.IntVar(&reportOpt, "r", 0, fmt.Sprintf("report interval in seconds, default: %d", defaultReportInterval))
 	fs.IntVar(&pollOpt, "p", 0, fmt.Sprintf("poll interval in seconds, default: %d", defaultPollInterval))
+	fs.IntVar(&limitOpt, "l", 0, "rate limit (max concurrent outgoing requests), default: 1")
 
 	if err := fs.Parse(args); err != nil {
 		return AgentConfig{}, err
@@ -88,11 +93,25 @@ func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 		return AgentConfig{}, fmt.Errorf("poll interval must be > 0, got %v", poll)
 	}
 
+	limit := defaultRateLimit
+	if ev := strings.TrimSpace(misc.Getenv("RATE_LIMIT", "")); ev != "" {
+		if n, err := strconv.Atoi(ev); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit == defaultRateLimit && limitOpt > 0 {
+		limit = limitOpt
+	}
+	if limit <= 0 {
+		limit = defaultRateLimit
+	}
+
 	return AgentConfig{
 		Address:        addr,
 		Key:            key,
 		PollInterval:   poll,
 		ReportInterval: report,
+		RateLimit:      limit,
 	}, nil
 }
 

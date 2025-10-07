@@ -274,3 +274,50 @@ func TestService_Run_EmptySnapshot(t *testing.T) {
 		t.Fatalf("publishes happened unexpectedly: batch=%d singles=%d", pub.batchCalls, len(pub.singleCalls))
 	}
 }
+
+func TestService_Run_RespectsRateLimit(t *testing.T) {
+	cfg := config.AgentConfig{
+		PollInterval:   1 * time.Millisecond,
+		ReportInterval: 1 * time.Millisecond,
+		RateLimit:      2,
+	}
+
+	coll := &fakeCollector{
+		gauges:   map[string]float64{"Alloc": 1.0},
+		counters: map[string]int64{"PollCount": 1},
+	}
+	pub := &concPublisher{sleep: 25 * time.Millisecond}
+
+	svc := New(cfg, coll, pub)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- svc.Run(ctx) }()
+
+	time.Sleep(40 * time.Millisecond)
+
+	coll.mu.Lock()
+	coll.gauges = map[string]float64{}
+	coll.counters = map[string]int64{}
+	coll.mu.Unlock()
+
+	time.Sleep(60 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run did not exit after cancel")
+	}
+
+	if pub.batchCalls == 0 {
+		t.Fatalf("expected some batch calls, got 0")
+	}
+	if pub.maxInflight != cfg.RateLimit {
+		t.Fatalf("max inflight=%d want=%d (должен соблюдаться верхний лимит одновременных исходящих)",
+			pub.maxInflight, cfg.RateLimit)
+	}
+}

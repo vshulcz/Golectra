@@ -30,29 +30,32 @@ func TestLoadAgentConfig(t *testing.T) {
 		},
 		{
 			name: "env override flags",
-			args: []string{"-a", "https://srv.example.com:9090", "-r", "7", "-p", "4", "-k", "hello"},
+			args: []string{"-a", "https://srv.example.com:9090", "-r", "7", "-p", "4", "-k", "hello", "-l", "5"},
 			env: map[string]string{
 				"ADDRESS":         "https://env-ignored:1234",
 				"REPORT_INTERVAL": "99s",
 				"POLL_INTERVAL":   "77s",
 				"KEY":             "world",
+				"RATE_LIMIT":      "3",
 			},
 			want: AgentConfig{
 				Address:        "https://env-ignored:1234",
 				ReportInterval: 99 * time.Second,
 				PollInterval:   77 * time.Second,
 				Key:            "world",
+				RateLimit:      3,
 			},
 		},
 		{
 			name: "only flags",
-			args: []string{"-a", "https://srv.example.com:9090", "-r", "7", "-p", "4", "-k", "hello"},
+			args: []string{"-a", "https://srv.example.com:9090", "-r", "7", "-p", "4", "-k", "hello", "-l", "5"},
 			env:  map[string]string{},
 			want: AgentConfig{
 				Address:        "https://srv.example.com:9090",
 				ReportInterval: 7 * time.Second,
 				PollInterval:   4 * time.Second,
 				Key:            "hello",
+				RateLimit:      5,
 			},
 		},
 		{
