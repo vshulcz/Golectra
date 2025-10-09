@@ -73,7 +73,7 @@ func TestCollector_SetsMetricsAndRandomValue(t *testing.T) {
 			g, cnt := p.Snapshot()
 			gotPoll, ok := cnt[MPollCount]
 			if !ok {
-				t.Fatalf("PollCount not present")
+				t.Fatal("PollCount not present")
 			}
 			if gotPoll < tc.ticks {
 				t.Fatalf("PollCount=%d < expected ticks=%d", gotPoll, tc.ticks)
@@ -87,7 +87,7 @@ func TestCollector_SetsMetricsAndRandomValue(t *testing.T) {
 			}
 
 			if rv, ok := g[MRandomValue]; !ok {
-				t.Fatalf("RandomValue missing")
+				t.Fatal("RandomValue missing")
 			} else if rv < 0.0 || rv >= 1.0 {
 				t.Fatalf("RandomValue out of range [0,1): %v", rv)
 			}

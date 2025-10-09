@@ -21,13 +21,14 @@ import (
 )
 
 type Client struct {
+	key  string
 	base *url.URL
 	hc   *http.Client
 }
 
 var _ ports.Publisher = (*Client)(nil)
 
-func New(serverAddr string, hc *http.Client) (*Client, error) {
+func New(serverAddr string, hc *http.Client, key string) (*Client, error) {
 	if hc == nil {
 		hc = &http.Client{Timeout: 10 * time.Second}
 	}
@@ -35,7 +36,7 @@ func New(serverAddr string, hc *http.Client) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{base: u, hc: hc}, nil
+	return &Client{base: u, hc: hc, key: strings.TrimSpace(key)}, nil
 }
 
 func normalizeBase(s string) string {
@@ -67,13 +68,20 @@ func (c *Client) doGzJSON(ctx context.Context, path string, payload any) error {
 	if err != nil {
 		return err
 	}
+
+	var hashHeader string
+	if c.key != "" {
+		hashHeader = misc.SumSHA256(plain, c.key)
+	}
+
 	gz, err := gzipBytes(plain)
 	if err != nil {
 		return err
 	}
 	gzBody := gz.Bytes()
+
 	resp, err := c.sendWithRetry(ctx, func() (*http.Request, error) {
-		return c.newGzJSONRequest(ctx, path, gzBody)
+		return c.newGzJSONRequest(ctx, path, gzBody, hashHeader)
 	})
 	if err != nil {
 		return err
@@ -137,7 +145,7 @@ func gzipBytes(src []byte) (*bytes.Buffer, error) {
 	var gz bytes.Buffer
 	zw := gzip.NewWriter(&gz)
 	if _, err := zw.Write(src); err != nil {
-		_ = zw.Close()
+		zw.Close()
 		return nil, fmt.Errorf("gzip write: %w", err)
 	}
 	if err := zw.Close(); err != nil {
@@ -146,7 +154,7 @@ func gzipBytes(src []byte) (*bytes.Buffer, error) {
 	return &gz, nil
 }
 
-func (c *Client) newGzJSONRequest(ctx context.Context, path string, body []byte) (*http.Request, error) {
+func (c *Client) newGzJSONRequest(ctx context.Context, path string, body []byte, hashHeader string) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(path), bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("new request: %w", err)
@@ -155,6 +163,10 @@ func (c *Client) newGzJSONRequest(ctx context.Context, path string, body []byte)
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
+	if hashHeader != "" {
+		req.Header.Set("HashSHA256", hashHeader)
+	}
+
 	return req, nil
 }
 

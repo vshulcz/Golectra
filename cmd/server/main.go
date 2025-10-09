@@ -41,8 +41,9 @@ func main() {
 
 	r := ginserver.NewRouter(h, logger,
 		middlewares.ZapLogger(logger),
-		middlewares.GunzipRequest(),
+		middlewares.GzipRequest(),
 		middlewares.GzipResponse(),
+		middlewares.HashSHA256(cfg.Key),
 	)
 
 	log.Printf("cfg: addr=%s file=%s interval=%v restore=%v dsn=%q",
