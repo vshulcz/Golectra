@@ -14,6 +14,8 @@ type Service struct {
 	collector ports.MetricsCollector
 	pub       ports.Publisher
 	cfg       config.AgentConfig
+
+	sender *BatchPublisher
 }
 
 func New(cfg config.AgentConfig, c ports.MetricsCollector, p ports.Publisher) *Service {
@@ -26,6 +28,10 @@ func (r *Service) Run(ctx context.Context) error {
 	}
 	defer r.collector.Stop()
 
+	r.sender = NewBatchPublisher(r.pub, r.cfg.RateLimit)
+	r.sender.Start(ctx)
+	defer r.sender.Stop()
+
 	ticker := time.NewTicker(r.cfg.ReportInterval)
 	defer ticker.Stop()
 
@@ -34,9 +40,38 @@ func (r *Service) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			r.reportOnce(ctx)
+			r.enqueueSnapshot()
 		}
 	}
+}
+
+func (r *Service) enqueueSnapshot() {
+	g, c := r.collector.Snapshot()
+	log.Printf("agent: reporting %d gauges, %d counters", len(g), len(c))
+
+	if len(g)+len(c) == 0 {
+		return
+	}
+
+	batch := make([]domain.Metrics, 0, len(g)+len(c))
+	for name, val := range g {
+		v := val
+		batch = append(batch, domain.Metrics{
+			ID:    name,
+			MType: string(domain.Gauge),
+			Value: &v,
+		})
+	}
+	for name, delta := range c {
+		d := delta
+		batch = append(batch, domain.Metrics{
+			ID:    name,
+			MType: string(domain.Counter),
+			Delta: &d,
+		})
+	}
+
+	r.sender.Submit(batch)
 }
 
 func (r *Service) reportOnce(ctx context.Context) {

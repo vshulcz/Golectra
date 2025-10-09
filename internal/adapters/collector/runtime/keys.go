@@ -31,4 +31,8 @@ const (
 
 	MRandomValue = "RandomValue"
 	MPollCount   = "PollCount"
+
+	TotalMemory    = "TotalMemory"
+	FreeMemory     = "FreeMemory"
+	CPUutilization = "CPUutilization"
 )

@@ -30,7 +30,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	log.Printf("agent started: server=%s poll=%s report=%s", cfg.Address, cfg.PollInterval, cfg.ReportInterval)
+	log.Printf("agent started: server=%s poll=%s report=%s limit=%d",
+		cfg.Address, cfg.PollInterval, cfg.ReportInterval, cfg.RateLimit)
 	if err := runner.Run(ctx); err != nil {
 		log.Fatal(err)
 	}
