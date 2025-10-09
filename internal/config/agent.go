@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/vshulcz/Golectra/internal/misc"
 )
 
 const (
@@ -52,59 +49,25 @@ func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 		return AgentConfig{}, err
 	}
 
-	addr := strings.TrimSpace(misc.Getenv("ADDRESS", ""))
-	if addr == "" {
-		addr = strings.TrimSpace(addrOpt)
-	}
-	if addr == "" {
-		addr = defaultServerAddr
-	}
+	addr := FromEnvOrFlag("ADDRESS", addrOpt, defaultServerAddr)
 	addr = normalizeAddressURL(addr)
 	if _, err := url.ParseRequestURI(addr); err != nil {
 		return AgentConfig{}, fmt.Errorf("invalid server address: %q", addr)
 	}
 
-	key := strings.TrimSpace(misc.Getenv("KEY", ""))
-	if key == "" {
-		key = strings.TrimSpace(keyOpt)
-	}
+	key := FromEnvOrFlag("KEY", keyOpt, "")
 
-	report := misc.GetDuration("REPORT_INTERVAL", 0)
-	if v := report; v == 0 && strings.TrimSpace(misc.Getenv("REPORT_INTERVAL", "")) == "" {
-		if reportOpt > 0 {
-			report = time.Duration(reportOpt) * time.Second
-		} else {
-			report = time.Duration(defaultReportInterval) * time.Second
-		}
-	}
+	report, _ := FromEnvOrFlagDuration("REPORT_INTERVAL", reportOpt, 0, defaultReportInterval)
 	if report <= 0 {
 		return AgentConfig{}, fmt.Errorf("report interval must be > 0, got %v", report)
 	}
 
-	poll := misc.GetDuration("POLL_INTERVAL", 0)
-	if v := poll; v == 0 && strings.TrimSpace(misc.Getenv("POLL_INTERVAL", "")) == "" {
-		if pollOpt > 0 {
-			poll = time.Duration(pollOpt) * time.Second
-		} else {
-			poll = time.Duration(defaultPollInterval) * time.Second
-		}
-	}
+	poll, _ := FromEnvOrFlagDuration("POLL_INTERVAL", pollOpt, 0, defaultPollInterval)
 	if poll <= 0 {
 		return AgentConfig{}, fmt.Errorf("poll interval must be > 0, got %v", poll)
 	}
 
-	limit := defaultRateLimit
-	if ev := strings.TrimSpace(misc.Getenv("RATE_LIMIT", "")); ev != "" {
-		if n, err := strconv.Atoi(ev); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	if limit == defaultRateLimit && limitOpt > 0 {
-		limit = limitOpt
-	}
-	if limit <= 0 {
-		limit = defaultRateLimit
-	}
+	limit := FromEnvOrFlagInt("RATE_LIMIT", limitOpt, defaultRateLimit, 1)
 
 	return AgentConfig{
 		Address:        addr,

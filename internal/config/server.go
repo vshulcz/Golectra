@@ -8,8 +8,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/vshulcz/Golectra/internal/misc"
 )
 
 const (
@@ -56,54 +54,22 @@ func LoadServerConfig(args []string, out io.Writer) (ServerConfig, error) {
 		return ServerConfig{}, err
 	}
 
-	addr := strings.TrimSpace(misc.Getenv("ADDRESS", ""))
-	if addr == "" {
-		addr = strings.TrimSpace(addrOpt)
-	}
-	if addr == "" {
-		addr = defaultListenAndServeAddr
-	}
+	addr := FromEnvOrFlag("ADDRESS", addrOpt, defaultListenAndServeAddr)
 	addr = normalizeListenAndServeURL(addr)
 	if _, port, err := net.SplitHostPort(addr); err != nil || port == "" {
 		return ServerConfig{}, fmt.Errorf("invalid listen address: %q", addr)
 	}
 
-	file := strings.TrimSpace(misc.Getenv("FILE_STORAGE_PATH", ""))
-	if file == "" {
-		file = strings.TrimSpace(fileOpt)
-	}
-	if file == "" {
-		file = defaultFilePath
-	}
+	file := FromEnvOrFlag("FILE_STORAGE_PATH", fileOpt, defaultFilePath)
+	dsn := FromEnvOrFlag("DATABASE_DSN", dsnOpt, "")
+	key := FromEnvOrFlag("KEY", keyOpt, "")
 
-	dsn := strings.TrimSpace(misc.Getenv("DATABASE_DSN", ""))
-	if dsn == "" {
-		dsn = strings.TrimSpace(dsnOpt)
-	}
-
-	key := strings.TrimSpace(misc.Getenv("KEY", ""))
-	if key == "" {
-		key = strings.TrimSpace(keyOpt)
-	}
-
-	interval := misc.GetDuration("STORE_INTERVAL", 0)
-	if v := interval; v == 0 && strings.TrimSpace(misc.Getenv("STORE_INTERVAL", "")) == "" {
-		if ivalOpt >= 0 {
-			interval = time.Duration(ivalOpt) * time.Second
-		} else {
-			interval = time.Duration(defaultStoreInterval) * time.Second
-		}
-	}
+	interval, _ := FromEnvOrFlagDuration("STORE_INTERVAL", ivalOpt, -1, defaultStoreInterval)
 	if interval < 0 {
 		return ServerConfig{}, fmt.Errorf("store interval must be >= 0, got %v", interval)
 	}
 
-	restore := defaultRestore
-	if ev := strings.TrimSpace(misc.Getenv("RESTORE", "")); ev != "" {
-		restore = misc.GetBool("RESTORE", defaultRestore)
-	} else if restoreOpt {
-		restore = true
-	}
+	restore := FromEnvOrFlagBool("RESTORE", restoreOpt, defaultRestore)
 
 	return ServerConfig{
 		Address:  addr,

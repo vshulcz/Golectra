@@ -39,16 +39,20 @@ func HashSHA256(key string) gin.HandlerFunc {
 		bw := &bodyBufferWriter{ResponseWriter: c.Writer}
 		c.Writer = bw
 
-		if c.Request.Method == http.MethodPost {
-			got := strings.TrimSpace(c.GetHeader("HashSHA256"))
-			if got != "" {
-				reqBody, _ := io.ReadAll(c.Request.Body)
-				_ = c.Request.Body.Close()
+		if got := strings.TrimSpace(c.GetHeader("HashSHA256")); got != "" {
+			reqBody, err := io.ReadAll(c.Request.Body)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "read body failed"})
+			} else {
+				if err := c.Request.Body.Close(); err != nil {
+					c.Error(err)
+				}
 				c.Request.Body = io.NopCloser(bytes.NewReader(reqBody))
-
-				want := misc.SumSHA256(reqBody, key)
-				if !strings.EqualFold(got, want) {
-					c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid hash"})
+				if len(reqBody) > 0 {
+					want := misc.SumSHA256(reqBody, key)
+					if !strings.EqualFold(got, want) {
+						c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "invalid hash"})
+					}
 				}
 			}
 		}
@@ -57,8 +61,10 @@ func HashSHA256(key string) gin.HandlerFunc {
 			c.Next()
 		}
 
-		sum := misc.SumSHA256(bw.body.Bytes(), key)
-		c.Header("HashSHA256", sum)
+		if bw.body.Len() > 0 {
+			sum := misc.SumSHA256(bw.body.Bytes(), key)
+			c.Header("HashSHA256", sum)
+		}
 
 		status := bw.status
 		if status == 0 {
@@ -67,6 +73,8 @@ func HashSHA256(key string) gin.HandlerFunc {
 
 		c.Writer = bw.ResponseWriter
 		c.Writer.WriteHeader(status)
-		c.Writer.Write(bw.body.Bytes())
+		if _, err := c.Writer.Write(bw.body.Bytes()); err != nil {
+			c.Error(err)
+		}
 	}
 }
