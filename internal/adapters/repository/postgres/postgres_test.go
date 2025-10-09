@@ -269,7 +269,7 @@ func newMockWithPing(t *testing.T) (*sql.DB, sqlmock.Sqlmock, *Repo, func()) {
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Fatalf("unmet expectations: %v", err)
 		}
-		_ = db.Close()
+		db.Close()
 	}
 	return db, mock, st, cleanup
 }

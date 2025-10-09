@@ -7,23 +7,24 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/vshulcz/Golectra/internal/misc"
 )
 
 const (
 	defaultServerAddr     = "http://localhost:8080"
 	defaultReportInterval = 10
 	defaultPollInterval   = 2
+	defaultRateLimit      = 1
 )
 
 type AgentConfig struct {
 	Address        string
+	Key            string
 	PollInterval   time.Duration
 	ReportInterval time.Duration
+	RateLimit      int
 }
 
-// CLI > ENV > defaults
+// ENV > CLI > defaults
 func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 	if out == nil {
 		out = io.Discard
@@ -33,53 +34,47 @@ func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 	fs.SetOutput(out)
 
 	var addrOpt string
+	var keyOpt string
 	var reportOpt int
 	var pollOpt int
+	var limitOpt int
 
 	fs.StringVar(&addrOpt, "a", "", fmt.Sprintf("server address (host:port or URL), default: %s", defaultServerAddr))
+	fs.StringVar(&keyOpt, "k", "", "secret key for HashSHA256 header")
 	fs.IntVar(&reportOpt, "r", 0, fmt.Sprintf("report interval in seconds, default: %d", defaultReportInterval))
 	fs.IntVar(&pollOpt, "p", 0, fmt.Sprintf("poll interval in seconds, default: %d", defaultPollInterval))
+	fs.IntVar(&limitOpt, "l", 0, "rate limit (max concurrent outgoing requests), default: 1")
 
 	if err := fs.Parse(args); err != nil {
 		return AgentConfig{}, err
 	}
 
-	addr := addrOpt
-	if strings.TrimSpace(addr) == "" {
-		addr = misc.Getenv("ADDRESS", defaultServerAddr)
-	}
+	addr := FromEnvOrFlag("ADDRESS", addrOpt, defaultServerAddr)
 	addr = normalizeAddressURL(addr)
-
 	if _, err := url.ParseRequestURI(addr); err != nil {
 		return AgentConfig{}, fmt.Errorf("invalid server address: %q", addr)
 	}
 
-	var report time.Duration
-	if reportOpt > 0 {
-		report = time.Duration(reportOpt) * time.Second
-	} else {
-		report = misc.GetDuration("REPORT_INTERVAL", time.Duration(defaultReportInterval)*time.Second)
-	}
+	key := FromEnvOrFlag("KEY", keyOpt, "")
 
+	report, _ := FromEnvOrFlagDuration("REPORT_INTERVAL", reportOpt, 0, defaultReportInterval)
 	if report <= 0 {
 		return AgentConfig{}, fmt.Errorf("report interval must be > 0, got %v", report)
 	}
 
-	var poll time.Duration
-	if pollOpt > 0 {
-		poll = time.Duration(pollOpt) * time.Second
-	} else {
-		poll = misc.GetDuration("POLL_INTERVAL", time.Duration(defaultPollInterval)*time.Second)
-	}
-
+	poll, _ := FromEnvOrFlagDuration("POLL_INTERVAL", pollOpt, 0, defaultPollInterval)
 	if poll <= 0 {
 		return AgentConfig{}, fmt.Errorf("poll interval must be > 0, got %v", poll)
 	}
 
+	limit := FromEnvOrFlagInt("RATE_LIMIT", limitOpt, defaultRateLimit, 1)
+
 	return AgentConfig{
 		Address:        addr,
+		Key:            key,
 		PollInterval:   poll,
 		ReportInterval: report,
+		RateLimit:      limit,
 	}, nil
 }
 

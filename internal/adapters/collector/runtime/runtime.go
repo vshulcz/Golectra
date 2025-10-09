@@ -2,9 +2,13 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"runtime"
 	"time"
+
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 
 	"github.com/vshulcz/Golectra/internal/ports"
 )
@@ -72,6 +76,30 @@ func (c *Collector) Start(ctx context.Context, interval time.Duration) error {
 			}
 		}
 	}()
+
+	tSys := time.NewTicker(interval)
+	go func() {
+		defer tSys.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-c.stop:
+				return
+			case <-tSys.C:
+				if vm, err := mem.VirtualMemory(); err == nil && vm != nil {
+					c.st.SetGauge(TotalMemory, float64(vm.Total))
+					c.st.SetGauge(FreeMemory, float64(vm.Free))
+				}
+				if pct, err := cpu.Percent(0, true); err == nil {
+					for i, p := range pct {
+						c.st.SetGauge(fmt.Sprintf("%s%d", CPUutilization, i+1), p)
+					}
+				}
+			}
+		}
+	}()
+
 	return nil
 }
 

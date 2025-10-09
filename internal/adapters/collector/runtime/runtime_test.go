@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 )
@@ -73,7 +74,7 @@ func TestCollector_SetsMetricsAndRandomValue(t *testing.T) {
 			g, cnt := p.Snapshot()
 			gotPoll, ok := cnt[MPollCount]
 			if !ok {
-				t.Fatalf("PollCount not present")
+				t.Fatal("PollCount not present")
 			}
 			if gotPoll < tc.ticks {
 				t.Fatalf("PollCount=%d < expected ticks=%d", gotPoll, tc.ticks)
@@ -87,7 +88,7 @@ func TestCollector_SetsMetricsAndRandomValue(t *testing.T) {
 			}
 
 			if rv, ok := g[MRandomValue]; !ok {
-				t.Fatalf("RandomValue missing")
+				t.Fatal("RandomValue missing")
 			} else if rv < 0.0 || rv >= 1.0 {
 				t.Fatalf("RandomValue out of range [0,1): %v", rv)
 			}
@@ -143,5 +144,44 @@ func TestPoller_StopsAndNoFurtherIncrements(t *testing.T) {
 				t.Fatalf("PollCount grew after Stop(): before=%d after=%d", valBefore, valAfter)
 			}
 		})
+	}
+}
+
+func TestCollector_SystemGaugesPresent(t *testing.T) {
+	p := New()
+
+	ctx := t.Context()
+
+	interval := 5 * time.Millisecond
+	if err := p.Start(ctx, interval); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	if !waitForPollCount(p, 1, time.Second) {
+		p.Stop()
+		t.Fatalf("timeout waiting for PollCount >= 1")
+	}
+	p.Stop()
+	time.Sleep(2 * interval)
+
+	g, _ := p.Snapshot()
+
+	if _, ok := g[TotalMemory]; !ok {
+		t.Fatalf("gauge %q not set", TotalMemory)
+	}
+	if _, ok := g[FreeMemory]; !ok {
+		t.Fatalf("gauge %q not set", FreeMemory)
+	}
+
+	foundCPU := false
+	for k, v := range g {
+		if strings.HasPrefix(k, CPUutilization) {
+			foundCPU = true
+			if v < 0.0 || v > 100.0 {
+				t.Fatalf("%s out of range [0,100]: %v", k, v)
+			}
+		}
+	}
+	if !foundCPU {
+		t.Fatalf("no CPUutilizationN gauges found")
 	}
 }

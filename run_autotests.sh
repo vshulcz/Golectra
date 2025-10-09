@@ -141,4 +141,5 @@ TMP=$(random_tempfile)
   -binary-path=cmd/server/server \
   -database-dsn='postgres://user:pass@127.0.0.1:5432/mydb?sslmode=disable' \
   -key="$TMP" \
-  -serv
+  -server-port=$PORT \
+  -source-path=.

@@ -212,20 +212,20 @@ func isRetryablePG(err error) bool {
 	var pqe *pq.Error
 	if errors.As(err, &pqe) {
 		code := string(pqe.Code)
-		if strings.HasPrefix(code, "08") ||
-			code == pgerrcode.ConnectionException ||
+		if code == pgerrcode.ConnectionException ||
 			code == pgerrcode.ConnectionDoesNotExist ||
 			code == pgerrcode.ConnectionFailure ||
 			code == pgerrcode.SQLClientUnableToEstablishSQLConnection ||
 			code == pgerrcode.SQLServerRejectedEstablishmentOfSQLConnection ||
 			code == pgerrcode.TransactionResolutionUnknown ||
-			code == pgerrcode.ProtocolViolation {
+			code == pgerrcode.ProtocolViolation ||
+			strings.HasPrefix(code, "08") {
 			return true
 		}
 
-		if strings.HasPrefix(code, "40") ||
-			code == pgerrcode.SerializationFailure ||
-			code == pgerrcode.DeadlockDetected {
+		if code == pgerrcode.SerializationFailure ||
+			code == pgerrcode.DeadlockDetected ||
+			strings.HasPrefix(code, "40") {
 			return true
 		}
 

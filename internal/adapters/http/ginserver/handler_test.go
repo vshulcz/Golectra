@@ -36,7 +36,7 @@ func newServer(t *testing.T, repo ports.MetricsRepo, onChanged ...func(context.C
 		h,
 		zap.NewNop(),
 		middlewares.ZapLogger(zap.NewNop()),
-		middlewares.GunzipRequest(),
+		middlewares.GzipRequest(),
 		middlewares.GzipResponse(),
 	)
 	return httptest.NewServer(r)
@@ -255,7 +255,7 @@ func TestHTTP_JSON(t *testing.T) {
 		{"update gauge ok", "/update", domain.Metrics{ID: "Alloc", MType: "gauge", Value: val(123.45)}, false, http.StatusOK,
 			func(t *testing.T, b []byte) {
 				var got domain.Metrics
-				_ = json.Unmarshal(b, &got)
+				json.Unmarshal(b, &got)
 				if got.Value == nil || *got.Value != 123.45 {
 					t.Fatalf("got=%+v", got)
 				}
@@ -263,7 +263,7 @@ func TestHTTP_JSON(t *testing.T) {
 		{"update counter ok", "/update", domain.Metrics{ID: "PollCount", MType: "counter", Delta: dlt(3)}, false, http.StatusOK,
 			func(t *testing.T, b []byte) {
 				var got domain.Metrics
-				_ = json.Unmarshal(b, &got)
+				json.Unmarshal(b, &got)
 				if got.Delta == nil || *got.Delta != 3 {
 					t.Fatalf("got=%+v", got)
 				}
@@ -277,7 +277,7 @@ func TestHTTP_JSON(t *testing.T) {
 		{"update accepts gzip body", "/update", domain.Metrics{ID: "LastGC", MType: "gauge", Value: val(777)}, true, http.StatusOK,
 			func(t *testing.T, b []byte) {
 				var got domain.Metrics
-				_ = json.Unmarshal(b, &got)
+				json.Unmarshal(b, &got)
 				if got.Value == nil || *got.Value != 777 {
 					t.Fatalf("got=%+v", got)
 				}
@@ -312,7 +312,7 @@ func TestHTTP_JSON(t *testing.T) {
 			t.Fatalf("status=%d body=%q", resp.StatusCode, string(body))
 		}
 		var got domain.Metrics
-		_ = json.Unmarshal(body, &got)
+		json.Unmarshal(body, &got)
 		if got.Delta == nil || *got.Delta != 7 {
 			t.Fatalf("accumulated delta=%v want 7", got.Delta)
 		}
@@ -325,7 +325,7 @@ func TestHTTP_JSON(t *testing.T) {
 			t.Fatalf("Content-Encoding=%q want gzip", ce)
 		}
 		var got domain.Metrics
-		_ = json.Unmarshal(body, &got)
+		json.Unmarshal(body, &got)
 		if got.Value == nil || *got.Value != 123.45 {
 			t.Fatalf("got=%+v", got)
 		}
