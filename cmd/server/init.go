@@ -7,7 +7,7 @@ import (
 	_ "github.com/lib/pq"
 	"go.uber.org/zap"
 
-	"github.com/vshulcz/Golectra/internal/adapters/persistance/file"
+	"github.com/vshulcz/Golectra/internal/adapters/persistence/file"
 	memrepo "github.com/vshulcz/Golectra/internal/adapters/repository/memory"
 	pgrepo "github.com/vshulcz/Golectra/internal/adapters/repository/postgres"
 	"github.com/vshulcz/Golectra/internal/config"
@@ -35,7 +35,7 @@ func buildRepoAndPersister(cfg config.ServerConfig, logger *zap.Logger) (ports.M
 	}
 	repo := memrepo.New()
 	var p ports.Persister = file.New(cfg.File)
-	if cfg.Restore && p != nil {
+	if cfg.Restore {
 		if err := p.Restore(ctx, repo); err != nil {
 			logger.Warn("restore failed", zap.Error(err))
 		} else {

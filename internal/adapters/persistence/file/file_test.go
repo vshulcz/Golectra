@@ -67,7 +67,7 @@ func TestRestore(t *testing.T) {
 
 	dir := t.TempDir()
 	file = filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(file, []byte("{not json"), 0644); err != nil {
+	if err := os.WriteFile(file, []byte("{not json"), 0o644); err != nil {
 		t.Fatalf("write bad json: %v", err)
 	}
 	p = New(file)

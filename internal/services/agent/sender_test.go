@@ -29,6 +29,7 @@ func (p *concPublisher) enter() {
 	}
 	p.mu.Unlock()
 }
+
 func (p *concPublisher) leave() {
 	p.mu.Lock()
 	p.inflight--
@@ -51,6 +52,7 @@ func (p *concPublisher) SendBatch(ctx context.Context, items []domain.Metrics) e
 	}
 	return nil
 }
+
 func (p *concPublisher) SendOne(ctx context.Context, _ domain.Metrics) error {
 	p.enter()
 	defer p.leave()
@@ -101,7 +103,7 @@ func TestBatchPublisher_RespectsConcurrencyLimit(t *testing.T) {
 		t.Fatalf("singleCalls=%d want=0", pub.singleCalls)
 	}
 	if pub.maxInflight != 2 {
-		t.Fatalf("max inflight=%d, want=2 (конкурентность пула)", pub.maxInflight)
+		t.Fatalf("max inflight=%d, want=2", pub.maxInflight)
 	}
 }
 
@@ -124,9 +126,9 @@ func TestBatchPublisher_FallbackToSingles(t *testing.T) {
 		t.Fatalf("batchCalls=%d want=1", pub.batchCalls)
 	}
 	if pub.singleCalls != size {
-		t.Fatalf("singleCalls=%d want=%d (fallback для каждого элемента)", pub.singleCalls, size)
+		t.Fatalf("singleCalls=%d want=%d", pub.singleCalls, size)
 	}
 	if pub.maxInflight != 1 {
-		t.Fatalf("max inflight=%d want=1 (лимит воркеров соблюдён)", pub.maxInflight)
+		t.Fatalf("max inflight=%d want=1", pub.maxInflight)
 	}
 }

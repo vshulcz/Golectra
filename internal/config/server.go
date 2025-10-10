@@ -27,7 +27,7 @@ type ServerConfig struct {
 	Restore  bool
 }
 
-// ENV > CLI > defaults
+// LoadServerConfig - ENV > CLI > defaults
 func LoadServerConfig(args []string, out io.Writer) (ServerConfig, error) {
 	if out == nil {
 		out = io.Discard
