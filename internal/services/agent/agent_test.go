@@ -314,10 +314,10 @@ func TestService_Run_RespectsRateLimit(t *testing.T) {
 	}
 
 	if pub.batchCalls == 0 {
-		t.Fatalf("expected some batch calls, got 0")
+		t.Fatal("expected some batch calls, got 0")
 	}
 	if pub.maxInflight != cfg.RateLimit {
-		t.Fatalf("max inflight=%d want=%d (должен соблюдаться верхний лимит одновременных исходящих)",
+		t.Fatalf("max inflight=%d want=%d",
 			pub.maxInflight, cfg.RateLimit)
 	}
 }

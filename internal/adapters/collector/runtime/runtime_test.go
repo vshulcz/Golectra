@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"math/rand"
 	"strings"
 	"testing"
@@ -56,8 +55,7 @@ func TestCollector_SetsMetricsAndRandomValue(t *testing.T) {
 			p := New()
 			p.rnd = rand.New(rand.NewSource(1))
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 
 			if err := p.Start(ctx, tc.interval); err != nil {
 				t.Fatalf("Start error: %v", err)
@@ -119,8 +117,7 @@ func TestPoller_StopsAndNoFurtherIncrements(t *testing.T) {
 			p := New()
 			p.rnd = rand.New(rand.NewSource(2))
 
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 
 			if err := p.Start(ctx, tc.interval); err != nil {
 				t.Fatalf("Start error: %v", err)
@@ -158,7 +155,7 @@ func TestCollector_SystemGaugesPresent(t *testing.T) {
 	}
 	if !waitForPollCount(p, 1, time.Second) {
 		p.Stop()
-		t.Fatalf("timeout waiting for PollCount >= 1")
+		t.Fatal("timeout waiting for PollCount >= 1")
 	}
 	p.Stop()
 	time.Sleep(2 * interval)
@@ -182,6 +179,6 @@ func TestCollector_SystemGaugesPresent(t *testing.T) {
 		}
 	}
 	if !foundCPU {
-		t.Fatalf("no CPUutilizationN gauges found")
+		t.Fatal("no CPUutilizationN gauges found")
 	}
 }

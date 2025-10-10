@@ -133,6 +133,7 @@ func TestLoadAgentConfig(t *testing.T) {
 		})
 	}
 }
+
 func TestNormalizeAddressURL(t *testing.T) {
 	cases := map[string]string{
 		"":                   "http://localhost:8080",

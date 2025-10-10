@@ -218,7 +218,6 @@ func TestHTTP_PathAndHTML(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			resp, body := doReq(t, tc.method, srv.URL+tc.path, nil, tc.hdr)
 			if resp.StatusCode != tc.wantCode {
@@ -252,40 +251,51 @@ func TestHTTP_JSON(t *testing.T) {
 	dlt := func(i int64) *int64 { return &i }
 
 	cases := []jtc{
-		{"update gauge ok", "/update", domain.Metrics{ID: "Alloc", MType: "gauge", Value: val(123.45)}, false, http.StatusOK,
+		{
+			"update gauge ok", "/update",
+			domain.Metrics{ID: "Alloc", MType: "gauge", Value: val(123.45)},
+			false, http.StatusOK,
 			func(t *testing.T, b []byte) {
 				var got domain.Metrics
 				json.Unmarshal(b, &got)
 				if got.Value == nil || *got.Value != 123.45 {
 					t.Fatalf("got=%+v", got)
 				}
-			}, false},
-		{"update counter ok", "/update", domain.Metrics{ID: "PollCount", MType: "counter", Delta: dlt(3)}, false, http.StatusOK,
+			}, false,
+		},
+		{
+			"update counter ok", "/update",
+			domain.Metrics{ID: "PollCount", MType: "counter", Delta: dlt(3)},
+			false, http.StatusOK,
 			func(t *testing.T, b []byte) {
 				var got domain.Metrics
 				json.Unmarshal(b, &got)
 				if got.Delta == nil || *got.Delta != 3 {
 					t.Fatalf("got=%+v", got)
 				}
-			}, false},
+			}, false,
+		},
 
 		{"update bad: missing value for gauge", "/update", domain.Metrics{ID: "X", MType: "gauge"}, false, http.StatusBadRequest, nil, false},
 		{"update bad: missing delta for counter", "/update", domain.Metrics{ID: "Y", MType: "counter"}, false, http.StatusBadRequest, nil, false},
 		{"update bad: empty id", "/update", domain.Metrics{ID: "", MType: "gauge", Value: val(1)}, false, http.StatusBadRequest, nil, false},
 		{"update bad: unknown type", "/update", domain.Metrics{ID: "Z", MType: "weird", Value: val(1)}, false, http.StatusBadRequest, nil, false},
 
-		{"update accepts gzip body", "/update", domain.Metrics{ID: "LastGC", MType: "gauge", Value: val(777)}, true, http.StatusOK,
+		{
+			"update accepts gzip body", "/update",
+			domain.Metrics{ID: "LastGC", MType: "gauge", Value: val(777)},
+			true, http.StatusOK,
 			func(t *testing.T, b []byte) {
 				var got domain.Metrics
 				json.Unmarshal(b, &got)
 				if got.Value == nil || *got.Value != 777 {
 					t.Fatalf("got=%+v", got)
 				}
-			}, false},
+			}, false,
+		},
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			b, _ := json.Marshal(tc.payload)
 			h := map[string]string{"Content-Type": "application/json", "Accept": "application/json"}
@@ -600,6 +610,7 @@ type errUpdateManyRepo struct{}
 func (*errUpdateManyRepo) GetGauge(context.Context, string) (float64, error) {
 	return 0, domain.ErrNotFound
 }
+
 func (*errUpdateManyRepo) GetCounter(context.Context, string) (int64, error) {
 	return 0, domain.ErrNotFound
 }
@@ -608,6 +619,7 @@ func (*errUpdateManyRepo) AddCounter(context.Context, string, int64) error { ret
 func (*errUpdateManyRepo) UpdateMany(context.Context, []domain.Metrics) error {
 	return errors.New("boom")
 }
+
 func (*errUpdateManyRepo) Snapshot(context.Context) (domain.Snapshot, error) {
 	return domain.Snapshot{Gauges: map[string]float64{}, Counters: map[string]int64{}}, nil
 }

@@ -23,11 +23,13 @@ func (s *stats) SetGauge(name string, v float64) {
 	s.gauges[name] = v
 	s.mu.Unlock()
 }
+
 func (s *stats) AddCounter(name string, d int64) {
 	s.mu.Lock()
 	s.counters[name] += d
 	s.mu.Unlock()
 }
+
 func (s *stats) Snapshot() (map[string]float64, map[string]int64) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

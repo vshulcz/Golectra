@@ -20,7 +20,6 @@ func TestSumSHA256(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got := SumSHA256(tc.value, tc.key)
 			if got != tc.want {
