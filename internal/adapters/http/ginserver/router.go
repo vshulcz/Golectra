@@ -27,6 +27,7 @@ func NewRouter(h *Handler, _ *zap.Logger, middlewares ...gin.HandlerFunc) *gin.E
 
 	r.POST("/update/:type/:name/:value", h.UpdateMetric)
 	r.GET("/value/:type/:name", h.GetMetric)
+	r.GET("/api/v1/snapshot", h.SnapshotJSON)
 	r.GET("/", h.Index)
 
 	// JSON endpoints

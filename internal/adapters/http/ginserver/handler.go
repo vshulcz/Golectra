@@ -170,6 +170,19 @@ func (h *Handler) Ping(c *gin.Context) {
 	c.String(http.StatusOK, "ok")
 }
 
+// GET /api/v1/snapshot
+func (h *Handler) SnapshotJSON(c *gin.Context) {
+	snap, err := h.svc.Snapshot(c.Request.Context())
+	if err != nil {
+		httpError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"gauges":   snap.Gauges,
+		"counters": snap.Counters,
+	})
+}
+
 func httpError(c *gin.Context, err error) {
 	switch {
 	case err == nil:
