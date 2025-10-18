@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/vshulcz/Golectra/internal/domain"
 	"github.com/vshulcz/Golectra/internal/ports"
 	"github.com/vshulcz/Golectra/internal/services/metrics"
@@ -624,3 +625,44 @@ func (*errUpdateManyRepo) Snapshot(context.Context) (domain.Snapshot, error) {
 	return domain.Snapshot{Gauges: map[string]float64{}, Counters: map[string]int64{}}, nil
 }
 func (*errUpdateManyRepo) Ping(context.Context) error { return errors.New("db not configured") }
+
+func TestSnapshotJSON_OK(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := memrepo.New()
+	if err := repo.SetGauge(context.TODO(), "CPUutilization1", 12.34); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetGauge(context.TODO(), "HeapAlloc", 111); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddCounter(context.TODO(), "PollCount", 7); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewHandler(metrics.New(repo, nil))
+	r := gin.New()
+	r.GET("/api/v1/snapshot", h.SnapshotJSON)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/snapshot", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, body=%s", w.Code, w.Body.String())
+	}
+
+	var got struct {
+		Gauges   map[string]float64 `json:"gauges"`
+		Counters map[string]int64   `json:"counters"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Gauges["CPUutilization1"] != 12.34 {
+		t.Fatalf("gauges.CPUutilization1=%v", got.Gauges["CPUutilization1"])
+	}
+	if got.Counters["PollCount"] != 7 {
+		t.Fatalf("counters.PollCount=%v", got.Counters["PollCount"])
+	}
+}
