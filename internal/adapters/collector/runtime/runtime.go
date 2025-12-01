@@ -24,7 +24,7 @@ var _ ports.MetricsCollector = (*Collector)(nil)
 func New() *Collector {
 	return &Collector{
 		st:   newStats(),
-		rnd:  rand.New(rand.NewSource(time.Now().UnixNano())),
+		rnd:  rand.New(rand.NewSource(time.Now().UnixNano())), // #nosec G404
 		stop: make(chan struct{}),
 	}
 }

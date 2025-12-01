@@ -2,30 +2,44 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
+	auditfile "github.com/vshulcz/Golectra/internal/adapters/audit/file"
+	auditremote "github.com/vshulcz/Golectra/internal/adapters/audit/remote"
 	"github.com/vshulcz/Golectra/internal/adapters/http/ginserver"
 	"github.com/vshulcz/Golectra/internal/adapters/http/ginserver/middlewares"
 	"github.com/vshulcz/Golectra/internal/config"
 	"github.com/vshulcz/Golectra/internal/domain"
+	"github.com/vshulcz/Golectra/internal/services/audit"
 	"github.com/vshulcz/Golectra/internal/services/metrics"
 	"go.uber.org/zap"
 )
 
 func main() {
-	cfg, err := config.LoadServerConfig(os.Args[1:], nil)
+	if err := run(os.Args[1:]); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run(args []string) error {
+	cfg, err := config.LoadServerConfig(args, nil)
 	if err != nil {
-		log.Fatalf("failed to parse flags: %v", err)
+		return err
 	}
 
 	logger, err := zap.NewProduction()
 	if err != nil {
-		log.Fatalf("failed to create logger: %v", err)
+		return err
 	}
-	defer logger.Sync()
+	defer func() {
+		if cerr := logger.Sync(); cerr != nil {
+			log.Printf("logger sync: %v", cerr)
+		}
+	}()
 
 	repo, persister := buildRepoAndPersister(cfg, logger)
 	onChanged := func(ctx context.Context, s domain.Snapshot) {
@@ -36,7 +50,8 @@ func main() {
 		}
 	}
 
-	svc := metrics.New(repo, onChanged)
+	auditor := buildAuditor(cfg, logger)
+	svc := metrics.New(repo, onChanged, auditor)
 	h := ginserver.NewHandler(svc)
 
 	r := ginserver.NewRouter(h, logger,
@@ -46,8 +61,8 @@ func main() {
 		middlewares.HashSHA256(cfg.Key),
 	)
 
-	log.Printf("cfg: addr=%s file=%s interval=%v restore=%v dsn=%q",
-		cfg.Address, cfg.File, cfg.Interval, cfg.Restore, cfg.DSN)
+	log.Printf("cfg: addr=%s file=%s interval=%v restore=%v dsn=%q audit_file=%q audit_url=%q",
+		cfg.Address, cfg.File, cfg.Interval, cfg.Restore, cfg.DSN, cfg.AuditFile, cfg.AuditURL)
 
 	if cfg.DSN == "" && cfg.Interval > 0 {
 		if cfg.Interval < 0 {
@@ -65,7 +80,37 @@ func main() {
 		}()
 	}
 
-	if err := http.ListenAndServe(cfg.Address, r); err != nil {
-		log.Fatal(err)
+	srv := &http.Server{
+		Addr:              cfg.Address,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+func buildAuditor(cfg config.ServerConfig, logger *zap.Logger) audit.Publisher {
+	if cfg.AuditFile == "" && cfg.AuditURL == "" {
+		return nil
+	}
+	subject := audit.NewSubject()
+	subject.SetErrorHandler(func(err error) {
+		logger.Warn("audit delivery failed", zap.Error(err))
+	})
+	if cfg.AuditFile != "" {
+		subject.Attach(auditfile.New(cfg.AuditFile))
+	}
+	if cfg.AuditURL != "" {
+		client, err := auditremote.New(cfg.AuditURL, nil)
+		if err != nil {
+			logger.Fatal("invalid audit url", zap.Error(err))
+		}
+		subject.Attach(client)
+	}
+	return subject
 }

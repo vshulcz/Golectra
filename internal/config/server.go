@@ -19,12 +19,14 @@ const (
 )
 
 type ServerConfig struct {
-	Address  string
-	File     string
-	DSN      string
-	Key      string
-	Interval time.Duration
-	Restore  bool
+	Address   string
+	File      string
+	DSN       string
+	Key       string
+	Interval  time.Duration
+	Restore   bool
+	AuditFile string
+	AuditURL  string
 }
 
 // LoadServerConfig - ENV > CLI > defaults
@@ -42,6 +44,8 @@ func LoadServerConfig(args []string, out io.Writer) (ServerConfig, error) {
 	var keyOpt string
 	var ivalOpt int
 	var restoreOpt bool
+	var auditFileOpt string
+	var auditURLOpt string
 
 	fs.StringVar(&addrOpt, "a", "", fmt.Sprintf("HTTP listen address, default: %s", defaultListenAndServeAddr))
 	fs.StringVar(&fileOpt, "f", "", fmt.Sprintf("FILE_STORAGE_PATH, default: %s", defaultFilePath))
@@ -49,6 +53,8 @@ func LoadServerConfig(args []string, out io.Writer) (ServerConfig, error) {
 	fs.StringVar(&keyOpt, "k", "", "secret key for HashSHA256")
 	fs.IntVar(&ivalOpt, "i", -1, fmt.Sprintf("STORE_INTERVAL seconds (0 - sync), default: %d", defaultStoreInterval))
 	fs.BoolVar(&restoreOpt, "r", false, fmt.Sprintf("RESTORE on start (true/false), default: %t", defaultRestore))
+	fs.StringVar(&auditFileOpt, "audit-file", "", "path to audit log file (disabled if empty)")
+	fs.StringVar(&auditURLOpt, "audit-url", "", "URL for sending audit events via HTTP POST (disabled if empty)")
 
 	if err := fs.Parse(args); err != nil {
 		return ServerConfig{}, err
@@ -63,6 +69,8 @@ func LoadServerConfig(args []string, out io.Writer) (ServerConfig, error) {
 	file := FromEnvOrFlag("FILE_STORAGE_PATH", fileOpt, defaultFilePath)
 	dsn := FromEnvOrFlag("DATABASE_DSN", dsnOpt, "")
 	key := FromEnvOrFlag("KEY", keyOpt, "")
+	auditFile := FromEnvOrFlag("AUDIT_FILE", auditFileOpt, "")
+	auditURL := FromEnvOrFlag("AUDIT_URL", auditURLOpt, "")
 
 	interval, _ := FromEnvOrFlagDuration("STORE_INTERVAL", ivalOpt, -1, defaultStoreInterval)
 	if interval < 0 {
@@ -72,12 +80,14 @@ func LoadServerConfig(args []string, out io.Writer) (ServerConfig, error) {
 	restore := FromEnvOrFlagBool("RESTORE", restoreOpt, defaultRestore)
 
 	return ServerConfig{
-		Address:  addr,
-		File:     file,
-		DSN:      dsn,
-		Key:      key,
-		Interval: interval,
-		Restore:  restore,
+		Address:   addr,
+		File:      file,
+		DSN:       dsn,
+		Key:       key,
+		Interval:  interval,
+		Restore:   restore,
+		AuditFile: auditFile,
+		AuditURL:  auditURL,
 	}, nil
 }
 

@@ -63,7 +63,7 @@ func (c *Client) SendBatch(ctx context.Context, metrics []domain.Metrics) error 
 	return c.doGzJSON(ctx, "/updates", metrics)
 }
 
-func (c *Client) doGzJSON(ctx context.Context, path string, payload any) error {
+func (c *Client) doGzJSON(ctx context.Context, path string, payload any) (retErr error) {
 	plain, err := marshalJSON(payload)
 	if err != nil {
 		return err
@@ -86,7 +86,11 @@ func (c *Client) doGzJSON(ctx context.Context, path string, payload any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil && retErr == nil {
+			retErr = fmt.Errorf("close response body: %w", cerr)
+		}
+	}()
 
 	if err := drainAndDiscard(resp); err != nil {
 		return err
@@ -145,7 +149,7 @@ func gzipBytes(src []byte) (*bytes.Buffer, error) {
 	var gz bytes.Buffer
 	zw := gzip.NewWriter(&gz)
 	if _, err := zw.Write(src); err != nil {
-		zw.Close()
+		_ = zw.Close()
 		return nil, fmt.Errorf("gzip write: %w", err)
 	}
 	if err := zw.Close(); err != nil {
@@ -194,10 +198,14 @@ func drainAndDiscard(resp *http.Response) error {
 		if err != nil {
 			return fmt.Errorf("bad gzip: %w", err)
 		}
-		defer gr.Close()
+		defer func() {
+			_ = gr.Close()
+		}()
 		r = gr
 	}
-	io.Copy(io.Discard, r)
+	if _, err := io.Copy(io.Discard, r); err != nil {
+		return fmt.Errorf("drain body: %w", err)
+	}
 	return nil
 }
 

@@ -19,7 +19,9 @@ func (g *gzipReadCloser) Read(p []byte) (int, error) {
 }
 
 func (g *gzipReadCloser) Close() error {
-	g.gz.Close()
+	if err := g.gz.Close(); err != nil {
+		return err
+	}
 	if g.raw != nil {
 		return g.raw.Close()
 	}
@@ -104,6 +106,8 @@ func GzipResponse() gin.HandlerFunc {
 		grw := &gzipResponseWriter{ResponseWriter: c.Writer, acceptGzip: true}
 		c.Writer = grw
 		c.Next()
-		grw.Close()
+		if err := grw.Close(); err != nil {
+			_ = c.Error(err)
+		}
 	}
 }

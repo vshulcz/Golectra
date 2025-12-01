@@ -21,6 +21,34 @@ import (
 	"github.com/vshulcz/Golectra/internal/misc"
 )
 
+const (
+	updatePath  = "/update"
+	updatesPath = "/updates"
+)
+
+func mustWrite(t *testing.T, w io.Writer, data []byte) {
+	t.Helper()
+	if _, err := w.Write(data); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+}
+
+func mustClose(t *testing.T, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
+func mustReadAll(t *testing.T, r io.Reader) []byte {
+	t.Helper()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	return b
+}
+
 func TestNew_NormalizeBaseAndTimeout(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -86,12 +114,12 @@ func TestClient_JoinPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := c.endpoint("/update"); got != "http://x:1/base/update" {
+	if got := c.endpoint(updatePath); got != "http://x:1/base/update" {
 		t.Fatalf("endpoint=%q want %q", got, "http://x:1/base/update")
 	}
 
 	c2, _ := New("http://x:1/base/", nil, "")
-	if got := c2.endpoint("/update"); got != "http://x:1/base/update" {
+	if got := c2.endpoint(updatePath); got != "http://x:1/base/update" {
 		t.Fatalf("endpoint=%q want %q", got, "http://x:1/base/update")
 	}
 }
@@ -116,7 +144,7 @@ func TestSendOne_VariousResponses(t *testing.T) {
 			name: "plain_200_ok",
 			serverReply: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("ok"))
+				mustWrite(t, w, []byte("ok"))
 			},
 		},
 		{
@@ -124,8 +152,8 @@ func TestSendOne_VariousResponses(t *testing.T) {
 			serverReply: func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Encoding", "gzip")
 				zw := gzip.NewWriter(w)
-				zw.Write([]byte("ok"))
-				zw.Close()
+				mustWrite(t, zw, []byte("ok"))
+				mustClose(t, zw)
 			},
 		},
 		{
@@ -133,7 +161,7 @@ func TestSendOne_VariousResponses(t *testing.T) {
 			serverReply: func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Encoding", "gzip")
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("not gzipped"))
+				mustWrite(t, w, []byte("not gzipped"))
 			},
 			wantErr: "bad gzip",
 		},
@@ -174,8 +202,10 @@ func TestSendOne_VariousResponses(t *testing.T) {
 				if err != nil {
 					t.Fatalf("request body not gzipped: %v", err)
 				}
-				defer gr.Close()
-				raw, _ := io.ReadAll(gr)
+				defer func() {
+					mustClose(t, gr)
+				}()
+				raw := mustReadAll(t, gr)
 				if err := json.Unmarshal(raw, &got.metric); err != nil {
 					t.Fatalf("bad json: %v; body=%q", err, string(raw))
 				}
@@ -204,8 +234,8 @@ func TestSendOne_VariousResponses(t *testing.T) {
 			if got.method != http.MethodPost {
 				t.Fatalf("method=%s want POST", got.method)
 			}
-			if got.path != "/update" {
-				t.Fatalf("path=%q want /update", got.path)
+			if got.path != updatePath {
+				t.Fatalf("path=%q want %s", got.path, updatePath)
 			}
 
 			if got.metric.ID != "Alloc" || got.metric.MType != "gauge" {
@@ -227,8 +257,8 @@ func TestSendOne_CounterPayloadAndHeaders(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method=%s want POST", r.Method)
 		}
-		if r.URL.Path != "/update" {
-			t.Errorf("path=%q want /update", r.URL.Path)
+		if r.URL.Path != updatePath {
+			t.Errorf("path=%q want %s", r.URL.Path, updatePath)
 		}
 		if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
 			t.Errorf("Content-Type=%q", ct)
@@ -247,8 +277,10 @@ func TestSendOne_CounterPayloadAndHeaders(t *testing.T) {
 		if err != nil {
 			t.Fatalf("request not gzipped: %v", err)
 		}
-		defer gr.Close()
-		raw, _ := io.ReadAll(gr)
+		defer func() {
+			mustClose(t, gr)
+		}()
+		raw := mustReadAll(t, gr)
 		if err := json.Unmarshal(raw, &captured); err != nil {
 			t.Fatalf("bad json: %v", err)
 		}
@@ -297,7 +329,7 @@ func TestSendBatch_VariousResponses(t *testing.T) {
 			name: "plain_200_ok",
 			serverReply: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("ok"))
+				mustWrite(t, w, []byte("ok"))
 			},
 		},
 		{
@@ -305,8 +337,8 @@ func TestSendBatch_VariousResponses(t *testing.T) {
 			serverReply: func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Encoding", "gzip")
 				zw := gzip.NewWriter(w)
-				zw.Write([]byte("ok"))
-				zw.Close()
+				mustWrite(t, zw, []byte("ok"))
+				mustClose(t, zw)
 			},
 		},
 		{
@@ -314,7 +346,7 @@ func TestSendBatch_VariousResponses(t *testing.T) {
 			serverReply: func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Encoding", "gzip")
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("not gzipped"))
+				mustWrite(t, w, []byte("not gzipped"))
 			},
 			wantErrSub: "bad gzip",
 		},
@@ -355,8 +387,10 @@ func TestSendBatch_VariousResponses(t *testing.T) {
 				if err != nil {
 					t.Fatalf("request body not gzipped: %v", err)
 				}
-				defer gr.Close()
-				raw, _ := io.ReadAll(gr)
+				defer func() {
+					mustClose(t, gr)
+				}()
+				raw := mustReadAll(t, gr)
 				if err := json.Unmarshal(raw, &got.metrics); err != nil {
 					t.Fatalf("bad json: %v; body=%q", err, string(raw))
 				}
@@ -390,7 +424,7 @@ func TestSendBatch_VariousResponses(t *testing.T) {
 			if got.method != http.MethodPost {
 				t.Fatalf("method=%s want POST", got.method)
 			}
-			if got.path != "/updates" {
+			if got.path != updatesPath {
 				t.Fatalf("path=%q want /updates", got.path)
 			}
 			if len(got.metrics) != 2 {
@@ -696,8 +730,8 @@ func TestSendOne_ServerGzipResponse(t *testing.T) {
 				h.Set("Content-Encoding", "gzip")
 				var b strings.Builder
 				zw := gzip.NewWriter(&nopWriteCloser{&b})
-				zw.Write([]byte("ok"))
-				zw.Close()
+				mustWrite(t, zw, []byte("ok"))
+				mustClose(t, zw)
 				return mkResp(http.StatusOK, b.String(), h), nil
 			},
 		},
@@ -716,7 +750,7 @@ func TestSendOne_NoHashHeader(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method=%s want POST", r.Method)
 		}
-		if r.URL.Path != "/update" {
+		if r.URL.Path != updatePath {
 			t.Errorf("path=%q want /update", r.URL.Path)
 		}
 
@@ -746,7 +780,7 @@ func TestSendOne_HashHeader_Present(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method=%s want POST", r.Method)
 		}
-		if r.URL.Path != "/update" {
+		if r.URL.Path != updatePath {
 			t.Errorf("path=%q want /update", r.URL.Path)
 		}
 
@@ -759,8 +793,10 @@ func TestSendOne_HashHeader_Present(t *testing.T) {
 		if err != nil {
 			t.Fatalf("request not gzipped: %v", err)
 		}
-		defer gr.Close()
-		raw, _ := io.ReadAll(gr)
+		defer func() {
+			mustClose(t, gr)
+		}()
+		raw := mustReadAll(t, gr)
 
 		expected := misc.SumSHA256(raw, key)
 		if h != expected {
@@ -788,7 +824,7 @@ func TestSendBatch_HashHeader_Present(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method=%s want POST", r.Method)
 		}
-		if r.URL.Path != "/updates" {
+		if r.URL.Path != updatesPath {
 			t.Errorf("path=%q want /updates", r.URL.Path)
 		}
 
@@ -801,8 +837,10 @@ func TestSendBatch_HashHeader_Present(t *testing.T) {
 		if err != nil {
 			t.Fatalf("request not gzipped: %v", err)
 		}
-		defer gr.Close()
-		raw, _ := io.ReadAll(gr)
+		defer func() {
+			mustClose(t, gr)
+		}()
+		raw := mustReadAll(t, gr)
 
 		expected := misc.SumSHA256(raw, key)
 		if h != expected {

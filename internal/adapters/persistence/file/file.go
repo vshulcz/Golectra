@@ -21,6 +21,33 @@ func New(path string) *Persister {
 }
 
 func (p *Persister) Save(_ context.Context, s domain.Snapshot) error {
+	items := flattenSnapshot(s)
+	return writeJSONAtomic(p.path, items)
+}
+
+func (p *Persister) Restore(ctx context.Context, repo ports.MetricsRepo) (retErr error) {
+	f, err := os.Open(p.path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("open: %w", err)
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil && retErr == nil {
+			retErr = fmt.Errorf("close: %w", cerr)
+		}
+	}()
+
+	var items []domain.Metrics
+	if err := json.NewDecoder(f).Decode(&items); err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+
+	return repo.UpdateMany(ctx, items)
+}
+
+func flattenSnapshot(s domain.Snapshot) []domain.Metrics {
 	total := len(s.Gauges) + len(s.Counters)
 	items := make([]domain.Metrics, 0, total)
 	for k, v := range s.Gauges {
@@ -31,10 +58,13 @@ func (p *Persister) Save(_ context.Context, s domain.Snapshot) error {
 		dd := d
 		items = append(items, domain.Metrics{ID: k, MType: string(domain.Counter), Delta: &dd})
 	}
+	return items
+}
 
-	dir := filepath.Dir(p.path)
+func writeJSONAtomic(path string, items []domain.Metrics) (retErr error) {
+	dir := filepath.Dir(path)
 	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return fmt.Errorf("mkdir: %w", err)
 		}
 	}
@@ -44,10 +74,17 @@ func (p *Persister) Save(_ context.Context, s domain.Snapshot) error {
 	}
 	tmpName := tmp.Name()
 	cleanup := true
+	closed := false
 	defer func() {
-		tmp.Close()
+		if !closed {
+			if cerr := tmp.Close(); cerr != nil && retErr == nil {
+				retErr = fmt.Errorf("close tmp: %w", cerr)
+			}
+		}
 		if cleanup {
-			os.Remove(tmpName)
+			if err := os.Remove(tmpName); err != nil && retErr == nil {
+				retErr = fmt.Errorf("remove tmp: %w", err)
+			}
 		}
 	}()
 	enc := json.NewEncoder(tmp)
@@ -58,27 +95,10 @@ func (p *Persister) Save(_ context.Context, s domain.Snapshot) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close tmp: %w", err)
 	}
-	if err := os.Rename(tmpName, p.path); err != nil {
+	closed = true
+	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("rename: %w", err)
 	}
 	cleanup = false
 	return nil
-}
-
-func (p *Persister) Restore(ctx context.Context, repo ports.MetricsRepo) error {
-	f, err := os.Open(p.path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("open: %w", err)
-	}
-	defer f.Close()
-
-	var items []domain.Metrics
-	if err := json.NewDecoder(f).Decode(&items); err != nil {
-		return fmt.Errorf("decode: %w", err)
-	}
-
-	return repo.UpdateMany(ctx, items)
 }

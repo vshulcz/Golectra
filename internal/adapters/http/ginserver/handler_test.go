@@ -30,7 +30,7 @@ func newServer(t *testing.T, repo ports.MetricsRepo, onChanged ...func(context.C
 		hook = onChanged[0]
 	}
 
-	svc := metrics.New(repo, hook)
+	svc := metrics.New(repo, hook, nil)
 	h := NewHandler(svc)
 
 	r := NewRouter(
@@ -49,7 +49,7 @@ func doReq(t *testing.T, method, url string, body []byte, hdr map[string]string)
 	if body != nil {
 		rd = bytes.NewReader(body)
 	}
-	req, err := http.NewRequest(method, url, rd)
+	req, err := http.NewRequestWithContext(context.Background(), method, url, rd)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -66,19 +66,27 @@ func doReq(t *testing.T, method, url string, body []byte, hdr map[string]string)
 
 func readMaybeGzip(t *testing.T, resp *http.Response) []byte {
 	t.Helper()
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Fatalf("resp body close: %v", err)
+		}
+	}()
 	var r io.Reader = resp.Body
 	if strings.Contains(strings.ToLower(resp.Header.Get("Content-Encoding")), "gzip") {
 		zr, err := gzip.NewReader(resp.Body)
 		if err != nil {
 			t.Fatalf("gzip reader: %v", err)
 		}
-		defer zr.Close()
+		defer func() {
+			if err := zr.Close(); err != nil {
+				t.Fatalf("gzip reader close: %v", err)
+			}
+		}()
 		r = zr
 	}
 	b, err := io.ReadAll(r)
 	if err != nil {
-		t.Fatalf("read body: %v", err)
+		t.Fatalf("read response: %v", err)
 	}
 	return b
 }
@@ -94,6 +102,13 @@ func gzipBytes(t *testing.T, b []byte) []byte {
 		t.Fatalf("gzip close: %v", err)
 	}
 	return buf.Bytes()
+}
+
+func mustUnmarshal(t *testing.T, data []byte, dst any) {
+	t.Helper()
+	if err := json.Unmarshal(data, dst); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
 }
 
 func TestHTTP_PathAndHTML(t *testing.T) {
@@ -258,7 +273,7 @@ func TestHTTP_JSON(t *testing.T) {
 			false, http.StatusOK,
 			func(t *testing.T, b []byte) {
 				var got domain.Metrics
-				json.Unmarshal(b, &got)
+				mustUnmarshal(t, b, &got)
 				if got.Value == nil || *got.Value != 123.45 {
 					t.Fatalf("got=%+v", got)
 				}
@@ -270,7 +285,7 @@ func TestHTTP_JSON(t *testing.T) {
 			false, http.StatusOK,
 			func(t *testing.T, b []byte) {
 				var got domain.Metrics
-				json.Unmarshal(b, &got)
+				mustUnmarshal(t, b, &got)
 				if got.Delta == nil || *got.Delta != 3 {
 					t.Fatalf("got=%+v", got)
 				}
@@ -288,7 +303,7 @@ func TestHTTP_JSON(t *testing.T) {
 			true, http.StatusOK,
 			func(t *testing.T, b []byte) {
 				var got domain.Metrics
-				json.Unmarshal(b, &got)
+				mustUnmarshal(t, b, &got)
 				if got.Value == nil || *got.Value != 777 {
 					t.Fatalf("got=%+v", got)
 				}
@@ -323,7 +338,7 @@ func TestHTTP_JSON(t *testing.T) {
 			t.Fatalf("status=%d body=%q", resp.StatusCode, string(body))
 		}
 		var got domain.Metrics
-		json.Unmarshal(body, &got)
+		mustUnmarshal(t, body, &got)
 		if got.Delta == nil || *got.Delta != 7 {
 			t.Fatalf("accumulated delta=%v want 7", got.Delta)
 		}
@@ -336,7 +351,7 @@ func TestHTTP_JSON(t *testing.T) {
 			t.Fatalf("Content-Encoding=%q want gzip", ce)
 		}
 		var got domain.Metrics
-		json.Unmarshal(body, &got)
+		mustUnmarshal(t, body, &got)
 		if got.Value == nil || *got.Value != 123.45 {
 			t.Fatalf("got=%+v", got)
 		}
@@ -416,7 +431,7 @@ func TestHTTP_UpdatesBatch(t *testing.T) {
 				t.Fatalf("status=%d body=%q", resp.StatusCode, string(raw))
 			}
 			var ur updResp
-			json.Unmarshal(raw, &ur)
+			mustUnmarshal(t, raw, &ur)
 			if ur.Updated != 2 {
 				t.Fatalf("updated=%d want 2", ur.Updated)
 			}
@@ -429,7 +444,7 @@ func TestHTTP_UpdatesBatch(t *testing.T) {
 				t.Fatalf("get gauge: status=%d body=%q", resp.StatusCode, string(raw))
 			}
 			var got domain.Metrics
-			json.Unmarshal(raw, &got)
+			mustUnmarshal(t, raw, &got)
 			if got.Value == nil || *got.Value != 3.14 {
 				t.Fatalf("g1=%+v want 3.14", got)
 			}
@@ -451,7 +466,7 @@ func TestHTTP_UpdatesBatch(t *testing.T) {
 				t.Fatalf("response must be gzipped; got %q", ce)
 			}
 			var ur updResp
-			json.Unmarshal(raw, &ur)
+			mustUnmarshal(t, raw, &ur)
 			if ur.Updated != 2 {
 				t.Fatalf("updated=%d want 2", ur.Updated)
 			}
@@ -526,7 +541,7 @@ func TestHTTP_UpdatesBatch(t *testing.T) {
 			t.Fatalf("status=%d body=%q", resp.StatusCode, string(raw))
 		}
 		var ur struct{ Updated int }
-		json.Unmarshal(raw, &ur)
+		mustUnmarshal(t, raw, &ur)
 		if ur.Updated != 2 {
 			t.Fatalf("updated=%d want 2", ur.Updated)
 		}
@@ -538,7 +553,7 @@ func TestHTTP_UpdatesBatch(t *testing.T) {
 				t.Fatalf("get ok1: %d", resp.StatusCode)
 			}
 			var got domain.Metrics
-			json.Unmarshal(raw, &got)
+			mustUnmarshal(t, raw, &got)
 			if got.Value == nil || *got.Value != 10 {
 				t.Fatalf("ok1=%+v", got)
 			}
@@ -550,7 +565,7 @@ func TestHTTP_UpdatesBatch(t *testing.T) {
 				t.Fatalf("get ok2: %d", resp.StatusCode)
 			}
 			var got domain.Metrics
-			json.Unmarshal(raw, &got)
+			mustUnmarshal(t, raw, &got)
 			if got.Delta == nil || *got.Delta != 5 {
 				t.Fatalf("ok2=%+v", got)
 			}
@@ -640,7 +655,7 @@ func TestSnapshotJSON_OK(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	h := NewHandler(metrics.New(repo, nil))
+	h := NewHandler(metrics.New(repo, nil, nil))
 	r := gin.New()
 	r.GET("/api/v1/snapshot", h.SnapshotJSON)
 
