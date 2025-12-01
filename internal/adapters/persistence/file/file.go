@@ -12,19 +12,23 @@ import (
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
+// Persister flushes and restores metric snapshots using a JSON file.
 type Persister struct {
 	path string
 }
 
+// New returns a Persister bound to the provided filesystem path.
 func New(path string) *Persister {
 	return &Persister{path: path}
 }
 
+// Save writes the snapshot to disk atomically.
 func (p *Persister) Save(_ context.Context, s domain.Snapshot) error {
 	items := flattenSnapshot(s)
 	return writeJSONAtomic(p.path, items)
 }
 
+// Restore loads metrics from disk and replays them into the provided repository.
 func (p *Persister) Restore(ctx context.Context, repo ports.MetricsRepo) (retErr error) {
 	f, err := os.Open(p.path)
 	if err != nil {

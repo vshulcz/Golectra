@@ -10,6 +10,7 @@ import (
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
+// Service periodically snapshots metrics and ships them to the server.
 type Service struct {
 	collector ports.MetricsCollector
 	pub       ports.Publisher
@@ -19,10 +20,12 @@ type Service struct {
 	batchBuf []domain.Metrics
 }
 
+// New wires together the agent configuration, collector, and publisher.
 func New(cfg config.AgentConfig, c ports.MetricsCollector, p ports.Publisher) *Service {
 	return &Service{cfg: cfg, collector: c, pub: p}
 }
 
+// Run starts sampling metrics, enqueues reports, and blocks until ctx is done.
 func (r *Service) Run(ctx context.Context) error {
 	if err := r.collector.Start(ctx, r.cfg.PollInterval); err != nil {
 		return err

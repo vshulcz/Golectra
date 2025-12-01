@@ -13,6 +13,7 @@ import (
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
+// Collector periodically samples Go runtime stats plus host CPU/RAM metrics.
 type Collector struct {
 	st   *stats
 	rnd  *rand.Rand
@@ -21,6 +22,7 @@ type Collector struct {
 
 var _ ports.MetricsCollector = (*Collector)(nil)
 
+// New creates a Collector with its own gauge storage and random source.
 func New() *Collector {
 	return &Collector{
 		st:   newStats(),
@@ -29,6 +31,7 @@ func New() *Collector {
 	}
 }
 
+// Start launches background goroutines that sample runtime and host metrics at the given interval.
 func (c *Collector) Start(ctx context.Context, interval time.Duration) error {
 	t := time.NewTicker(interval)
 	go func() {
@@ -103,6 +106,7 @@ func (c *Collector) Start(ctx context.Context, interval time.Duration) error {
 	return nil
 }
 
+// Stop signals every collector goroutine to halt.
 func (c *Collector) Stop() {
 	select {
 	case <-c.stop:
@@ -111,6 +115,7 @@ func (c *Collector) Stop() {
 	}
 }
 
+// Snapshot returns copies of the latest gauge and counter values.
 func (c *Collector) Snapshot() (map[string]float64, map[string]int64) {
 	return c.st.Snapshot()
 }

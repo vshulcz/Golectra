@@ -16,6 +16,7 @@ const (
 	defaultRateLimit      = 1
 )
 
+// AgentConfig holds runtime parameters for the metrics agent.
 type AgentConfig struct {
 	Address        string
 	Key            string
@@ -24,7 +25,7 @@ type AgentConfig struct {
 	RateLimit      int
 }
 
-// ENV > CLI > defaults
+// LoadAgentConfig resolves CLI flags, environment variables, and defaults (ENV > CLI > defaults).
 func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 	if out == nil {
 		out = io.Discard

@@ -10,15 +10,18 @@ import (
 	"github.com/vshulcz/Golectra/internal/services/audit"
 )
 
+// Writer appends audit events to a local newline-delimited JSON file.
 type Writer struct {
 	path string
 	mu   sync.Mutex
 }
 
+// New creates a Writer that writes every event to the provided filesystem path.
 func New(path string) *Writer {
 	return &Writer{path: path}
 }
 
+// Notify marshals the audit event and atomically appends it to the writer's file.
 func (w *Writer) Notify(_ context.Context, evt audit.Event) (retErr error) {
 	if w == nil || w.path == "" {
 		return nil

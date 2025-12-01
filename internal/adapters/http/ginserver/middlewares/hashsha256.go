@@ -27,6 +27,7 @@ func (w *bodyBufferWriter) WriteHeader(code int) {
 	w.status = code
 }
 
+// HashSHA256 validates and sets the custom HashSHA256 header using the provided secret key.
 func HashSHA256(key string) gin.HandlerFunc {
 	key = strings.TrimSpace(key)
 	if key == "" {

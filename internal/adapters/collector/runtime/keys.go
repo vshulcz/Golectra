@@ -1,5 +1,6 @@
 package runtime
 
+// MAlloc and related constants enumerate the runtime and host metric keys published by the Collector.
 const (
 	MAlloc         = "Alloc"
 	MBuckHashSys   = "BuckHashSys"

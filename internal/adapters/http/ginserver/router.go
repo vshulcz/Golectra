@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// NewRouter wires all HTTP endpoints, optional middlewares, and standard error handlers.
 func NewRouter(h *Handler, _ *zap.Logger, middlewares ...gin.HandlerFunc) *gin.Engine {
 	r := gin.New()
 

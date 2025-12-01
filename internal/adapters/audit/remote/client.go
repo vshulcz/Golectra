@@ -14,11 +14,13 @@ import (
 	"github.com/vshulcz/Golectra/internal/services/audit"
 )
 
+// Client sends audit events to a remote HTTP endpoint.
 type Client struct {
 	endpoint string
 	hc       *http.Client
 }
 
+// New validates the endpoint URL and returns a Client that POSTs audit events there.
 func New(rawURL string, hc *http.Client) (*Client, error) {
 	if strings.TrimSpace(rawURL) == "" {
 		return nil, fmt.Errorf("audit url is empty")
@@ -32,6 +34,7 @@ func New(rawURL string, hc *http.Client) (*Client, error) {
 	return &Client{endpoint: rawURL, hc: hc}, nil
 }
 
+// Notify serializes the audit event and issues an HTTP POST to the configured endpoint.
 func (c *Client) Notify(ctx context.Context, evt audit.Event) (retErr error) {
 	if c == nil {
 		return nil

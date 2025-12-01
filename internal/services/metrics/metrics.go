@@ -11,6 +11,7 @@ import (
 	"github.com/vshulcz/Golectra/internal/services/audit"
 )
 
+// Service exposes business operations for querying and mutating metrics.
 type Service struct {
 	repo      ports.MetricsRepo
 	onChanged func(context.Context, domain.Snapshot)
@@ -18,14 +19,17 @@ type Service struct {
 	now       func() time.Time
 }
 
+// New builds a metrics Service with repository, snapshot hook, and optional auditor.
 func New(repo ports.MetricsRepo, onChanged func(context.Context, domain.Snapshot), auditor audit.Publisher) *Service {
 	return &Service{repo: repo, onChanged: onChanged, auditor: auditor, now: time.Now}
 }
 
+// Ping delegates to the underlying repository health check.
 func (s *Service) Ping(ctx context.Context) error {
 	return s.repo.Ping(ctx)
 }
 
+// Get loads a single metric by type and identifier.
 func (s *Service) Get(ctx context.Context, mType, id string) (domain.Metrics, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -49,6 +53,7 @@ func (s *Service) Get(ctx context.Context, mType, id string) (domain.Metrics, er
 	}
 }
 
+// Upsert validates and stores one gauge or counter value.
 func (s *Service) Upsert(ctx context.Context, m domain.Metrics) (domain.Metrics, error) {
 	m.ID = strings.TrimSpace(m.ID)
 	if m.ID == "" {
@@ -84,6 +89,7 @@ func (s *Service) Upsert(ctx context.Context, m domain.Metrics) (domain.Metrics,
 	}
 }
 
+// UpsertBatch applies many metrics in a single repository call and triggers snapshot callbacks.
 func (s *Service) UpsertBatch(ctx context.Context, items []domain.Metrics) (int, error) {
 	valid := make([]domain.Metrics, 0, len(items))
 	names := make([]string, 0, len(items))
@@ -123,6 +129,7 @@ func (s *Service) UpsertBatch(ctx context.Context, items []domain.Metrics) (int,
 	return len(valid), nil
 }
 
+// Snapshot returns all known metrics.
 func (s *Service) Snapshot(ctx context.Context) (domain.Snapshot, error) {
 	return s.repo.Snapshot(ctx)
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/vshulcz/Golectra/internal/misc"
 )
 
+// FromEnvOrFlag returns the environment value when present, otherwise falls back to a CLI flag then default.
 func FromEnvOrFlag(envKey, flagVal, def string) string {
 	if v := strings.TrimSpace(os.Getenv(envKey)); v != "" {
 		return v
@@ -19,6 +20,7 @@ func FromEnvOrFlag(envKey, flagVal, def string) string {
 	return def
 }
 
+// FromEnvOrFlagBool merges boolean values from ENV and flags (defaulting to def).
 func FromEnvOrFlagBool(envKey string, flagVal, def bool) bool {
 	if ev := strings.TrimSpace(os.Getenv(envKey)); ev != "" {
 		return misc.GetBool(envKey, def)
@@ -29,6 +31,7 @@ func FromEnvOrFlagBool(envKey string, flagVal, def bool) bool {
 	return def
 }
 
+// FromEnvOrFlagInt resolves integer values with minimum validation.
 func FromEnvOrFlagInt(envKey string, flagVal, def, min int) int {
 	if ev := strings.TrimSpace(os.Getenv(envKey)); ev != "" {
 		if n, err := strconv.Atoi(ev); err == nil && n >= min {
@@ -41,6 +44,7 @@ func FromEnvOrFlagInt(envKey string, flagVal, def, min int) int {
 	return def
 }
 
+// FromEnvOrFlagDuration reads a duration (seconds or Go syntax) with fallbacks and reports whether it came from config.
 func FromEnvOrFlagDuration(envKey string, flagSeconds, flagSentinel, defSeconds int) (time.Duration, bool) {
 	if ev := strings.TrimSpace(os.Getenv(envKey)); ev != "" {
 		if n, err := strconv.ParseInt(ev, 10, 64); err == nil {
