@@ -15,7 +15,8 @@ type Service struct {
 	pub       ports.Publisher
 	cfg       config.AgentConfig
 
-	sender *BatchPublisher
+	sender   *BatchPublisher
+	batchBuf []domain.Metrics
 }
 
 func New(cfg config.AgentConfig, c ports.MetricsCollector, p ports.Publisher) *Service {
@@ -82,7 +83,25 @@ func (r *Service) reportOnce(ctx context.Context) {
 		return
 	}
 
-	batch := make([]domain.Metrics, 0, len(g)+len(c))
+	batch := r.buildBatch(g, c)
+	defer func() { r.recycleBatch(batch) }()
+	if err := r.pub.SendBatch(ctx, batch); err != nil {
+		log.Printf("agent: batch send failed (%v), fallback to single requests", err)
+		for _, m := range batch {
+			if err := r.pub.SendOne(ctx, m); err != nil {
+				log.Printf("agent: send single failed (%s/%s): %v", m.MType, m.ID, err)
+			}
+		}
+	}
+}
+
+func (r *Service) buildBatch(g map[string]float64, c map[string]int64) []domain.Metrics {
+	total := len(g) + len(c)
+	buf := r.batchBuf
+	if cap(buf) < total {
+		buf = make([]domain.Metrics, 0, total)
+	}
+	batch := buf[:0]
 	for name, val := range g {
 		v := val
 		batch = append(batch, domain.Metrics{
@@ -99,13 +118,13 @@ func (r *Service) reportOnce(ctx context.Context) {
 			Delta: &d,
 		})
 	}
+	r.batchBuf = batch
+	return batch
+}
 
-	if err := r.pub.SendBatch(ctx, batch); err != nil {
-		log.Printf("agent: batch send failed (%v), fallback to single requests", err)
-		for _, m := range batch {
-			if err := r.pub.SendOne(ctx, m); err != nil {
-				log.Printf("agent: send single failed (%s/%s): %v", m.MType, m.ID, err)
-			}
-		}
+func (r *Service) recycleBatch(batch []domain.Metrics) {
+	if batch == nil {
+		return
 	}
+	r.batchBuf = batch[:0]
 }

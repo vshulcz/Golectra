@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -27,6 +28,19 @@ type Client struct {
 }
 
 var _ ports.Publisher = (*Client)(nil)
+
+var (
+	gzipWriterPool = sync.Pool{
+		New: func() any {
+			return gzip.NewWriter(io.Discard)
+		},
+	}
+	bufferPool = sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
+)
 
 func New(serverAddr string, hc *http.Client, key string) (*Client, error) {
 	if hc == nil {
@@ -74,11 +88,12 @@ func (c *Client) doGzJSON(ctx context.Context, path string, payload any) (retErr
 		hashHeader = misc.SumSHA256(plain, c.key)
 	}
 
-	gz, err := gzipBytes(plain)
+	gzPayload, err := gzipBytes(plain)
 	if err != nil {
 		return err
 	}
-	gzBody := gz.Bytes()
+	defer gzPayload.Release()
+	gzBody := gzPayload.Bytes()
 
 	resp, err := c.sendWithRetry(ctx, func() (*http.Request, error) {
 		return c.newGzJSONRequest(ctx, path, gzBody, hashHeader)
@@ -145,17 +160,46 @@ func marshalJSON(payload any) ([]byte, error) {
 	return b, nil
 }
 
-func gzipBytes(src []byte) (*bytes.Buffer, error) {
-	var gz bytes.Buffer
-	zw := gzip.NewWriter(&gz)
+type compressedPayload struct {
+	buf *bytes.Buffer
+}
+
+func (p *compressedPayload) Bytes() []byte {
+	if p == nil || p.buf == nil {
+		return nil
+	}
+	return p.buf.Bytes()
+}
+
+func (p *compressedPayload) Release() {
+	if p == nil || p.buf == nil {
+		return
+	}
+	p.buf.Reset()
+	bufferPool.Put(p.buf)
+	p.buf = nil
+}
+
+func gzipBytes(src []byte) (*compressedPayload, error) {
+	buf := bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	zw := gzipWriterPool.Get().(*gzip.Writer)
+	zw.Reset(buf)
 	if _, err := zw.Write(src); err != nil {
 		_ = zw.Close()
+		gzipWriterPool.Put(zw)
+		buf.Reset()
+		bufferPool.Put(buf)
 		return nil, fmt.Errorf("gzip write: %w", err)
 	}
 	if err := zw.Close(); err != nil {
+		gzipWriterPool.Put(zw)
+		buf.Reset()
+		bufferPool.Put(buf)
 		return nil, fmt.Errorf("gzip close: %w", err)
 	}
-	return &gz, nil
+	gzipWriterPool.Put(zw)
+	return &compressedPayload{buf: buf}, nil
 }
 
 func (c *Client) newGzJSONRequest(ctx context.Context, path string, body []byte, hashHeader string) (*http.Request, error) {

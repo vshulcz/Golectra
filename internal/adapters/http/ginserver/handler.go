@@ -1,10 +1,13 @@
 package ginserver
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/vshulcz/Golectra/internal/domain"
@@ -18,6 +21,29 @@ type Handler struct {
 
 func NewHandler(svc *metrics.Service) *Handler {
 	return &Handler{svc: svc}
+}
+
+var metricsBatchPool = sync.Pool{
+	New: func() any {
+		batch := make([]domain.Metrics, 0, 256)
+		return &batch
+	},
+}
+
+func decodeMetricsBatch(r io.Reader) ([]domain.Metrics, func(), error) {
+	buf := metricsBatchPool.Get().(*[]domain.Metrics)
+	items := (*buf)[:0]
+	dec := json.NewDecoder(r)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&items); err != nil {
+		metricsBatchPool.Put(buf)
+		return nil, func() {}, err
+	}
+	cleanup := func() {
+		*buf = items[:0]
+		metricsBatchPool.Put(buf)
+	}
+	return items, cleanup, nil
 }
 
 // POST /update/:type/:name/:value
@@ -151,11 +177,12 @@ func (h *Handler) GetMetricJSON(c *gin.Context) {
 
 // POST /updates (application/json)
 func (h *Handler) UpdateMetricsBatchJSON(c *gin.Context) {
-	var items []domain.Metrics
-	if err := c.ShouldBindJSON(&items); err != nil {
+	items, release, err := decodeMetricsBatch(c.Request.Body)
+	if err != nil {
 		c.String(http.StatusBadRequest, "bad request")
 		return
 	}
+	defer release()
 	ctx := audit.WithClientIP(c.Request.Context(), c.ClientIP())
 	updated, err := h.svc.UpsertBatch(ctx, items)
 	if err != nil {
