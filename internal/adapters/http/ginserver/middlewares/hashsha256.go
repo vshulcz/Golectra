@@ -27,6 +27,7 @@ func (w *bodyBufferWriter) WriteHeader(code int) {
 	w.status = code
 }
 
+// HashSHA256 validates and sets the custom HashSHA256 header using the provided secret key.
 func HashSHA256(key string) gin.HandlerFunc {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -45,7 +46,7 @@ func HashSHA256(key string) gin.HandlerFunc {
 				c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "read body failed"})
 			} else {
 				if err := c.Request.Body.Close(); err != nil {
-					c.Error(err)
+					_ = c.Error(err)
 				}
 				c.Request.Body = io.NopCloser(bytes.NewReader(reqBody))
 				if len(reqBody) > 0 {
@@ -74,7 +75,7 @@ func HashSHA256(key string) gin.HandlerFunc {
 		c.Writer = bw.ResponseWriter
 		c.Writer.WriteHeader(status)
 		if _, err := c.Writer.Write(bw.body.Bytes()); err != nil {
-			c.Error(err)
+			_ = c.Error(err)
 		}
 	}
 }

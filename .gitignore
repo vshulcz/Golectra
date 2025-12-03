@@ -5,9 +5,11 @@ cmd/server/server
 *.out
 *.log
 *.tmp
+bin/
 
-# autotests
+# tests
 metricstest
+coverage*
 
 # IDE
 .vscode/

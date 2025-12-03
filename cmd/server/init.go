@@ -21,7 +21,7 @@ func buildRepoAndPersister(cfg config.ServerConfig, logger *zap.Logger) (ports.M
 		db, err := sql.Open("postgres", cfg.DSN)
 		if err == nil {
 			op := func() error {
-				if err := db.Ping(); err != nil {
+				if err := db.PingContext(ctx); err != nil {
 					return err
 				}
 				return pgrepo.Migrate(db)

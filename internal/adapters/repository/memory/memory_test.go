@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"testing"
@@ -119,8 +120,12 @@ func TestMemStorage(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				ms := New()
-				ms.SetGauge(context.TODO(), "pre_g", 10)
-				ms.AddCounter(context.TODO(), "pre_c", 5)
+				if err := ms.SetGauge(context.TODO(), "pre_g", 10); err != nil {
+					t.Fatalf("seed gauge: %v", err)
+				}
+				if err := ms.AddCounter(context.TODO(), "pre_c", 5); err != nil {
+					t.Fatalf("seed counter: %v", err)
+				}
 
 				if err := ms.UpdateMany(context.TODO(), tc.items); err != nil {
 					t.Fatalf("UpdateMany error: %v", err)
@@ -158,8 +163,12 @@ func TestMemStorage(t *testing.T) {
 
 	t.Run("SnapshotIsolation", func(t *testing.T) {
 		ms := New()
-		ms.SetGauge(context.TODO(), "g", 1.0)
-		ms.AddCounter(context.TODO(), "c", 1)
+		if err := ms.SetGauge(context.TODO(), "g", 1.0); err != nil {
+			t.Fatalf("seed gauge: %v", err)
+		}
+		if err := ms.AddCounter(context.TODO(), "c", 1); err != nil {
+			t.Fatalf("seed counter: %v", err)
+		}
 
 		s, _ := ms.Snapshot(context.TODO())
 		s.Gauges["g"] = 100.0
@@ -188,14 +197,22 @@ func TestMemStorage(t *testing.T) {
 				wg.Add(1)
 				func(i int) {
 					defer wg.Done()
-					ms.SetGauge(context.TODO(), "g", float64(i))
-					ms.AddCounter(context.TODO(), "c", int64(i))
+					if err := ms.SetGauge(context.TODO(), "g", float64(i)); err != nil {
+						panic(err)
+					}
+					if err := ms.AddCounter(context.TODO(), "c", int64(i)); err != nil {
+						panic(err)
+					}
 				}(i)
 			}
 			for range 10 {
 				wg.Go(func() {
-					ms.GetGauge(context.TODO(), "g")
-					ms.GetCounter(context.TODO(), "c")
+					if _, err := ms.GetGauge(context.TODO(), "g"); err != nil && !errors.Is(err, domain.ErrNotFound) {
+						panic(err)
+					}
+					if _, err := ms.GetCounter(context.TODO(), "c"); err != nil && !errors.Is(err, domain.ErrNotFound) {
+						panic(err)
+					}
 				})
 			}
 			wg.Wait()
@@ -216,7 +233,9 @@ func TestMemStorage(t *testing.T) {
 						d := int64(1)
 						items = append(items, domain.Metrics{ID: "c", MType: string(domain.Counter), Delta: &d})
 					}
-					ms.UpdateMany(context.TODO(), items)
+					if err := ms.UpdateMany(context.TODO(), items); err != nil {
+						panic(err)
+					}
 				}()
 			}
 			wg.Wait()
@@ -239,11 +258,13 @@ func TestMemStorage(t *testing.T) {
 			}
 
 			for i := range workers {
-				go func() {
+				go func(i int) {
 					defer wg.Done()
 					items := []domain.Metrics{{ID: "g", MType: string(domain.Gauge), Value: ptrFloat64(values[i])}}
-					ms.UpdateMany(context.TODO(), items)
-				}()
+					if err := ms.UpdateMany(context.TODO(), items); err != nil {
+						panic(err)
+					}
+				}(i)
 			}
 			wg.Wait()
 

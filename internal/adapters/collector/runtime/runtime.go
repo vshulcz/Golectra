@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -13,25 +14,31 @@ import (
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
+// Collector periodically samples Go runtime stats plus host CPU/RAM metrics.
 type Collector struct {
 	st   *stats
 	rnd  *rand.Rand
 	stop chan struct{}
+	wg   sync.WaitGroup
 }
 
 var _ ports.MetricsCollector = (*Collector)(nil)
 
+// New creates a Collector with its own gauge storage and random source.
 func New() *Collector {
 	return &Collector{
 		st:   newStats(),
-		rnd:  rand.New(rand.NewSource(time.Now().UnixNano())),
+		rnd:  rand.New(rand.NewSource(time.Now().UnixNano())), // #nosec G404
 		stop: make(chan struct{}),
 	}
 }
 
+// Start launches background goroutines that sample runtime and host metrics at the given interval.
 func (c *Collector) Start(ctx context.Context, interval time.Duration) error {
 	t := time.NewTicker(interval)
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		defer t.Stop()
 		var ms runtime.MemStats
 		for {
@@ -78,7 +85,9 @@ func (c *Collector) Start(ctx context.Context, interval time.Duration) error {
 	}()
 
 	tSys := time.NewTicker(interval)
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		defer tSys.Stop()
 		for {
 			select {
@@ -103,14 +112,17 @@ func (c *Collector) Start(ctx context.Context, interval time.Duration) error {
 	return nil
 }
 
+// Stop signals every collector goroutine to halt and waits for them to finish.
 func (c *Collector) Stop() {
 	select {
 	case <-c.stop:
 	default:
 		close(c.stop)
 	}
+	c.wg.Wait()
 }
 
+// Snapshot returns copies of the latest gauge and counter values.
 func (c *Collector) Snapshot() (map[string]float64, map[string]int64) {
 	return c.st.Snapshot()
 }

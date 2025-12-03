@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
+// Client publishes metrics to the server using gzipped JSON requests.
 type Client struct {
 	key  string
 	base *url.URL
@@ -28,6 +30,20 @@ type Client struct {
 
 var _ ports.Publisher = (*Client)(nil)
 
+var (
+	gzipWriterPool = sync.Pool{
+		New: func() any {
+			return gzip.NewWriter(io.Discard)
+		},
+	}
+	bufferPool = sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
+)
+
+// New normalizes the base address, configures the HTTP client, and returns a Client instance.
 func New(serverAddr string, hc *http.Client, key string) (*Client, error) {
 	if hc == nil {
 		hc = &http.Client{Timeout: 10 * time.Second}
@@ -52,10 +68,12 @@ func (c *Client) endpoint(path string) string {
 	return u.String()
 }
 
+// SendOne sends a single metric to the /update endpoint.
 func (c *Client) SendOne(ctx context.Context, m domain.Metrics) error {
 	return c.doGzJSON(ctx, "/update", m)
 }
 
+// SendBatch sends all metrics to the /updates endpoint in one gzipped payload.
 func (c *Client) SendBatch(ctx context.Context, metrics []domain.Metrics) error {
 	if len(metrics) == 0 {
 		return nil
@@ -63,7 +81,7 @@ func (c *Client) SendBatch(ctx context.Context, metrics []domain.Metrics) error 
 	return c.doGzJSON(ctx, "/updates", metrics)
 }
 
-func (c *Client) doGzJSON(ctx context.Context, path string, payload any) error {
+func (c *Client) doGzJSON(ctx context.Context, path string, payload any) (retErr error) {
 	plain, err := marshalJSON(payload)
 	if err != nil {
 		return err
@@ -74,11 +92,12 @@ func (c *Client) doGzJSON(ctx context.Context, path string, payload any) error {
 		hashHeader = misc.SumSHA256(plain, c.key)
 	}
 
-	gz, err := gzipBytes(plain)
+	gzPayload, err := gzipBytes(plain)
 	if err != nil {
 		return err
 	}
-	gzBody := gz.Bytes()
+	defer gzPayload.Release()
+	gzBody := gzPayload.Bytes()
 
 	resp, err := c.sendWithRetry(ctx, func() (*http.Request, error) {
 		return c.newGzJSONRequest(ctx, path, gzBody, hashHeader)
@@ -86,7 +105,11 @@ func (c *Client) doGzJSON(ctx context.Context, path string, payload any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil && retErr == nil {
+			retErr = fmt.Errorf("close response body: %w", cerr)
+		}
+	}()
 
 	if err := drainAndDiscard(resp); err != nil {
 		return err
@@ -141,17 +164,46 @@ func marshalJSON(payload any) ([]byte, error) {
 	return b, nil
 }
 
-func gzipBytes(src []byte) (*bytes.Buffer, error) {
-	var gz bytes.Buffer
-	zw := gzip.NewWriter(&gz)
+type compressedPayload struct {
+	buf *bytes.Buffer
+}
+
+func (p *compressedPayload) Bytes() []byte {
+	if p == nil || p.buf == nil {
+		return nil
+	}
+	return p.buf.Bytes()
+}
+
+func (p *compressedPayload) Release() {
+	if p == nil || p.buf == nil {
+		return
+	}
+	p.buf.Reset()
+	bufferPool.Put(p.buf)
+	p.buf = nil
+}
+
+func gzipBytes(src []byte) (*compressedPayload, error) {
+	buf := bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	zw := gzipWriterPool.Get().(*gzip.Writer)
+	zw.Reset(buf)
 	if _, err := zw.Write(src); err != nil {
-		zw.Close()
+		_ = zw.Close()
+		gzipWriterPool.Put(zw)
+		buf.Reset()
+		bufferPool.Put(buf)
 		return nil, fmt.Errorf("gzip write: %w", err)
 	}
 	if err := zw.Close(); err != nil {
+		gzipWriterPool.Put(zw)
+		buf.Reset()
+		bufferPool.Put(buf)
 		return nil, fmt.Errorf("gzip close: %w", err)
 	}
-	return &gz, nil
+	gzipWriterPool.Put(zw)
+	return &compressedPayload{buf: buf}, nil
 }
 
 func (c *Client) newGzJSONRequest(ctx context.Context, path string, body []byte, hashHeader string) (*http.Request, error) {
@@ -194,10 +246,14 @@ func drainAndDiscard(resp *http.Response) error {
 		if err != nil {
 			return fmt.Errorf("bad gzip: %w", err)
 		}
-		defer gr.Close()
+		defer func() {
+			_ = gr.Close()
+		}()
 		r = gr
 	}
-	io.Copy(io.Discard, r)
+	if _, err := io.Copy(io.Discard, r); err != nil {
+		return fmt.Errorf("drain body: %w", err)
+	}
 	return nil
 }
 

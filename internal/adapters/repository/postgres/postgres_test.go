@@ -248,12 +248,17 @@ func newMock(t *testing.T) (*sql.DB, sqlmock.Sqlmock, *Repo, func()) {
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
+	mock.MatchExpectationsInOrder(false)
+	mock.ExpectClose()
+
 	st := &Repo{db: db}
 	cleanup := func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("db.Close: %v", err)
+		}
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Fatalf("unmet expectations: %v", err)
 		}
-		db.Close()
 	}
 	return db, mock, st, cleanup
 }
@@ -264,12 +269,17 @@ func newMockWithPing(t *testing.T) (*sql.DB, sqlmock.Sqlmock, *Repo, func()) {
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
+	mock.MatchExpectationsInOrder(false)
+	mock.ExpectClose()
+
 	st := &Repo{db: db}
 	cleanup := func() {
+		if err := db.Close(); err != nil {
+			t.Fatalf("db.Close: %v", err)
+		}
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Fatalf("unmet expectations: %v", err)
 		}
-		db.Close()
 	}
 	return db, mock, st, cleanup
 }

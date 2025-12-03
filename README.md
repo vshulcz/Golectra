@@ -1,5 +1,12 @@
 # Golectra
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/vshulcz/Golectra)](https://goreportcard.com/report/github.com/vshulcz/Golectra)
+[![codecov](https://codecov.io/gh/vshulcz/Golectra/branch/main/graph/badge.svg)](https://codecov.io/gh/vshulcz/Golectra)
+[![CI](https://github.com/vshulcz/Golectra/workflows/autotests/badge.svg)](https://github.com/vshulcz/Golectra/actions)
+[![Lint](https://github.com/vshulcz/Golectra/workflows/lint/badge.svg)](https://github.com/vshulcz/Golectra/actions)
+[![Go Reference](https://pkg.go.dev/badge/github.com/vshulcz/Golectra.svg)](https://pkg.go.dev/github.com/vshulcz/Golectra)
+[![License](https://img.shields.io/github/license/vshulcz/Golectra)](LICENSE)
+
 Golectra is a tiny, self-hosted metrics stack in pure Go:
 a lightweight agent collects Go runtime + host metrics and ships them (gzipped JSON) to a server with a simple HTTP API and optional integrity checks.
 
@@ -77,20 +84,36 @@ curl -X POST http://localhost:8080/update \
   -d "$BODY" -i
 ```
 
+## Audit trail
+
+Set `--audit-file /path/to/audit.ndjson` (or `AUDIT_FILE`) to append newline-delimited JSON events locally, `--audit-url https://audit.example.com/hook` (or `AUDIT_URL`) to POST events to a remote service, or enable both. Each successful metrics write triggers a fan-out notification to every configured sink via the Observer pattern, using this payload:
+
+```json
+{
+  "ts": 1735584000,
+  "metrics": ["Alloc", "PollCount"],
+  "ip_address": "192.168.0.42"
+}
+```
+
+Delivery failures are logged but never bubble up to the HTTP handlers, so metric ingestion stays available even if an audit sink is down.
+
 
 ## Configuration
 
 You can use ENV, CLI flags, or defaults (ENV > CLI > defaults).
 
 #### Server
-| Setting          | ENV                 | Flag | Default           | Notes                                                         |
-| ---------------- | ------------------- | ---- | ----------------- | ------------------------------------------------------------- |
-| Address          | `ADDRESS`           | `-a` | `:8080`           | `host:port`                                                   |
-| File storage     | `FILE_STORAGE_PATH` | `-f` | `metrics-db.json` | JSON snapshot file                                            |
-| Postgres DSN     | `DATABASE_DSN`      | `-d` | *empty*           | e.g. `postgres://user:pass@localhost:5432/db?sslmode=disable` |
-| Secret key       | `KEY`               | `-k` | *empty*           | enables `HashSHA256`                                          |
-| Store interval   | `STORE_INTERVAL`    | `-i` | `300s`            | `0` = sync writes                                             |
-| Restore on start | `RESTORE`           | `-r` | `false`           | load from file at boot                                        |
+| Setting          | ENV                 | Flag           | Default           | Notes                                                                 |
+| ---------------- | ------------------- | -------------- | ----------------- | --------------------------------------------------------------------- |
+| Address          | `ADDRESS`           | `-a`            | `:8080`           | `host:port`                                                           |
+| File storage     | `FILE_STORAGE_PATH` | `-f`            | `metrics-db.json` | JSON snapshot file                                                    |
+| Postgres DSN     | `DATABASE_DSN`      | `-d`            | *empty*           | e.g. `postgres://user:pass@localhost:5432/db?sslmode=disable`         |
+| Secret key       | `KEY`               | `-k`            | *empty*           | enables `HashSHA256`                                                  |
+| Store interval   | `STORE_INTERVAL`    | `-i`            | `300s`            | `0` = sync writes                                                     |
+| Restore on start | `RESTORE`           | `-r`            | `false`           | load from file at boot                                                |
+| Audit file       | `AUDIT_FILE`        | `--audit-file`  | *empty*           | newline-delimited JSON audit log fan-out target (disabled when empty) |
+| Audit URL        | `AUDIT_URL`         | `--audit-url`   | *empty*           | HTTP POST endpoint for audit events (disabled when empty)             |
 
 #### Agent
 | Setting         | ENV               | Flag | Default                 | Notes                   |

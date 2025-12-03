@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// ZapLogger logs structured request metadata for every HTTP call.
 func ZapLogger(l *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()

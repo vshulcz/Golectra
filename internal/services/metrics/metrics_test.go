@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/vshulcz/Golectra/internal/domain"
+	"github.com/vshulcz/Golectra/internal/services/audit"
 )
 
 type fakeRepo struct {
@@ -34,6 +37,35 @@ type fakeRepo struct {
 	nextSnapshotErr error
 	getGaugeErr     map[string]error
 	getCounterErr   map[string]error
+}
+
+type fakeAuditor struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (f *fakeAuditor) Publish(_ context.Context, evt audit.Event) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, evt)
+}
+
+func (f *fakeAuditor) Events() []audit.Event {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]audit.Event, len(f.events))
+	copy(out, f.events)
+	return out
+}
+
+func (f *fakeAuditor) WaitForEvents(n int, timeout time.Duration) []audit.Event {
+	deadline := time.Now().Add(timeout)
+	for {
+		if events := f.Events(); len(events) >= n || time.Now().After(deadline) {
+			return events
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func newFakeRepo() *fakeRepo {
@@ -149,7 +181,7 @@ func (r *fakeRepo) Ping(_ context.Context) error {
 
 func TestService_Ping_Error(t *testing.T) {
 	repo := newFakeRepo()
-	s := New(repo, nil)
+	s := New(repo, nil, nil)
 
 	if err := s.Ping(context.Background()); err != nil {
 		t.Fatalf("Ping unexpected err: %v", err)
@@ -165,7 +197,7 @@ func TestService_Get(t *testing.T) {
 	repo.gauges["Alloc"] = 1.25
 	repo.counters["PollCount"] = 9
 
-	svc := New(repo, nil)
+	svc := New(repo, nil, nil)
 
 	tests := []struct {
 		name    string
@@ -223,7 +255,7 @@ func stringsTrim(s string) string {
 
 func TestService_Upsert(t *testing.T) {
 	repo := newFakeRepo()
-	svc := New(repo, nil)
+	svc := New(repo, nil, nil)
 
 	tests := []struct {
 		name    string
@@ -292,7 +324,7 @@ func TestService_UpsertBatch(t *testing.T) {
 		cbLast = s
 	}
 
-	svc := New(repo, cb)
+	svc := New(repo, cb, nil)
 
 	validGauge := domain.Metrics{ID: "g", MType: string(domain.Gauge), Value: ptrFloat64(1.5)}
 	validCounter := domain.Metrics{ID: "c", MType: string(domain.Counter), Delta: ptrInt(3)}
@@ -384,7 +416,7 @@ func TestService_Snapshot_Proxy(t *testing.T) {
 	repo := newFakeRepo()
 	repo.gauges["g"] = 2.2
 	repo.counters["c"] = 8
-	svc := New(repo, nil)
+	svc := New(repo, nil, nil)
 
 	s, err := svc.Snapshot(context.Background())
 	if err != nil {
@@ -397,6 +429,69 @@ func TestService_Snapshot_Proxy(t *testing.T) {
 	repo.nextSnapshotErr = errors.New("boom")
 	if _, err := svc.Snapshot(context.Background()); err == nil {
 		t.Fatal("expected snapshot error")
+	}
+}
+
+func TestService_Upsert_EmitsAudit(t *testing.T) {
+	repo := newFakeRepo()
+	aud := &fakeAuditor{}
+	svc := New(repo, nil, aud)
+	t.Cleanup(svc.Close)
+	svc.now = func() time.Time { return time.Unix(99, 0) }
+
+	ctx := audit.WithClientIP(context.Background(), "10.0.0.1")
+	_, err := svc.Upsert(ctx, domain.Metrics{ID: "Alloc", MType: string(domain.Gauge), Value: ptrFloat64(1.0)})
+	if err != nil {
+		t.Fatalf("Upsert err: %v", err)
+	}
+
+	events := aud.WaitForEvents(1, time.Second)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(events))
+	}
+	evt := events[0]
+	if evt.Timestamp != 99 {
+		t.Fatalf("timestamp mismatch: %d", evt.Timestamp)
+	}
+	if !reflect.DeepEqual(evt.Metrics, []string{"Alloc"}) {
+		t.Fatalf("metrics mismatch: %+v", evt.Metrics)
+	}
+	if evt.IPAddress != "10.0.0.1" {
+		t.Fatalf("ip mismatch: %q", evt.IPAddress)
+	}
+}
+
+func TestService_UpsertBatch_EmitsAuditDedup(t *testing.T) {
+	repo := newFakeRepo()
+	aud := &fakeAuditor{}
+	svc := New(repo, nil, aud)
+	t.Cleanup(svc.Close)
+	svc.now = func() time.Time { return time.Unix(5, 0) }
+
+	items := []domain.Metrics{
+		{ID: "A", MType: string(domain.Gauge), Value: ptrFloat64(1)},
+		{ID: "B", MType: string(domain.Counter), Delta: ptrInt(2)},
+		{ID: "A", MType: string(domain.Counter), Delta: ptrInt(3)},
+		{ID: "   ", MType: string(domain.Gauge), Value: ptrFloat64(1)},
+	}
+	ctx := audit.WithClientIP(context.Background(), "192.0.2.1")
+	updated, err := svc.UpsertBatch(ctx, items)
+	if err != nil {
+		t.Fatalf("UpsertBatch err: %v", err)
+	}
+	if updated != 3 {
+		t.Fatalf("updated=%d want 3", updated)
+	}
+
+	events := aud.WaitForEvents(1, time.Second)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Timestamp != 5 {
+		t.Fatalf("timestamp mismatch: %d", events[0].Timestamp)
+	}
+	if !reflect.DeepEqual(events[0].Metrics, []string{"A", "B"}) {
+		t.Fatalf("metrics payload: %+v", events[0].Metrics)
 	}
 }
 

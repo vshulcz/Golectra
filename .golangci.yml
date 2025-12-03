@@ -50,7 +50,7 @@ linters:
     revive:
       rules:
         - name: exported
-          disabled: true
+          disabled: false
   exclusions:
     paths:
       - vendor

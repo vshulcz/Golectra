@@ -128,10 +128,11 @@ func TestPoller_StopsAndNoFurtherIncrements(t *testing.T) {
 				t.Fatalf("timeout waiting for PollCount >= %d", tc.ticks)
 			}
 
+			p.Stop()
+
 			_, cntBefore := p.Snapshot()
 			valBefore := cntBefore[MPollCount]
 
-			p.Stop()
 			time.Sleep(3 * tc.interval)
 
 			_, cntAfter := p.Snapshot()

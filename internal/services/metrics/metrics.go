@@ -2,25 +2,81 @@ package metrics
 
 import (
 	"context"
+	"log"
+	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/vshulcz/Golectra/internal/domain"
 	"github.com/vshulcz/Golectra/internal/ports"
+	"github.com/vshulcz/Golectra/internal/services/audit"
 )
 
+// Service exposes business operations for querying and mutating metrics.
 type Service struct {
 	repo      ports.MetricsRepo
 	onChanged func(context.Context, domain.Snapshot)
+	auditor   audit.Publisher
+	now       func() time.Time
+
+	auditQueue chan auditEvent
+	auditStop  context.CancelFunc
+	auditWG    sync.WaitGroup
 }
 
-func New(repo ports.MetricsRepo, onChanged func(context.Context, domain.Snapshot)) *Service {
-	return &Service{repo: repo, onChanged: onChanged}
+// New builds a metrics Service with repository, snapshot hook, and optional auditor.
+func New(repo ports.MetricsRepo, onChanged func(context.Context, domain.Snapshot), auditor audit.Publisher) *Service {
+	s := &Service{repo: repo, onChanged: onChanged, auditor: auditor, now: time.Now}
+	s.initAuditDispatcher()
+	return s
 }
 
+type auditEvent struct {
+	ctx context.Context
+	evt audit.Event
+}
+
+const auditQueueSize = 128
+
+func (s *Service) initAuditDispatcher() {
+	if s == nil || s.auditor == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.auditQueue = make(chan auditEvent, auditQueueSize)
+	s.auditStop = cancel
+	s.auditWG.Add(1)
+	go func() {
+		defer s.auditWG.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-s.auditQueue:
+				s.auditor.Publish(msg.ctx, msg.evt)
+			}
+		}
+	}()
+}
+
+// Close stops background workers and releases resources.
+func (s *Service) Close() {
+	if s == nil || s.auditStop == nil {
+		return
+	}
+	s.auditStop()
+	s.auditWG.Wait()
+	s.auditStop = nil
+	s.auditQueue = nil
+}
+
+// Ping delegates to the underlying repository health check.
 func (s *Service) Ping(ctx context.Context) error {
 	return s.repo.Ping(ctx)
 }
 
+// Get loads a single metric by type and identifier.
 func (s *Service) Get(ctx context.Context, mType, id string) (domain.Metrics, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -44,8 +100,10 @@ func (s *Service) Get(ctx context.Context, mType, id string) (domain.Metrics, er
 	}
 }
 
+// Upsert validates and stores one gauge or counter value.
 func (s *Service) Upsert(ctx context.Context, m domain.Metrics) (domain.Metrics, error) {
-	if strings.TrimSpace(m.ID) == "" {
+	m.ID = strings.TrimSpace(m.ID)
+	if m.ID == "" {
 		return domain.Metrics{}, domain.ErrNotFound
 	}
 	switch m.MType {
@@ -56,7 +114,11 @@ func (s *Service) Upsert(ctx context.Context, m domain.Metrics) (domain.Metrics,
 		if err := s.repo.SetGauge(ctx, m.ID, *m.Value); err != nil {
 			return domain.Metrics{}, err
 		}
-		return s.Get(ctx, m.MType, m.ID)
+		res, err := s.Get(ctx, m.MType, m.ID)
+		if err == nil {
+			s.notifyAudit(ctx, []string{m.ID})
+		}
+		return res, err
 	case string(domain.Counter):
 		if m.Delta == nil {
 			return domain.Metrics{}, domain.ErrInvalidType
@@ -64,18 +126,26 @@ func (s *Service) Upsert(ctx context.Context, m domain.Metrics) (domain.Metrics,
 		if err := s.repo.AddCounter(ctx, m.ID, *m.Delta); err != nil {
 			return domain.Metrics{}, err
 		}
-		return s.Get(ctx, m.MType, m.ID)
+		res, err := s.Get(ctx, m.MType, m.ID)
+		if err == nil {
+			s.notifyAudit(ctx, []string{m.ID})
+		}
+		return res, err
 	default:
 		return domain.Metrics{}, domain.ErrInvalidType
 	}
 }
 
+// UpsertBatch applies many metrics in a single repository call and triggers snapshot callbacks.
 func (s *Service) UpsertBatch(ctx context.Context, items []domain.Metrics) (int, error) {
 	valid := make([]domain.Metrics, 0, len(items))
+	names := make([]string, 0, len(items))
 	for _, it := range items {
-		if strings.TrimSpace(it.ID) == "" {
+		id := strings.TrimSpace(it.ID)
+		if id == "" {
 			continue
 		}
+		it.ID = id
 		switch it.MType {
 		case string(domain.Gauge):
 			if it.Value == nil {
@@ -89,6 +159,7 @@ func (s *Service) UpsertBatch(ctx context.Context, items []domain.Metrics) (int,
 			continue
 		}
 		valid = append(valid, it)
+		names = append(names, it.ID)
 	}
 	if len(valid) == 0 {
 		return 0, domain.ErrInvalidType
@@ -96,6 +167,7 @@ func (s *Service) UpsertBatch(ctx context.Context, items []domain.Metrics) (int,
 	if err := s.repo.UpdateMany(ctx, valid); err != nil {
 		return 0, err
 	}
+	s.notifyAudit(ctx, names)
 	if s.onChanged != nil {
 		if snap, err := s.repo.Snapshot(ctx); err == nil {
 			s.onChanged(ctx, snap)
@@ -104,6 +176,56 @@ func (s *Service) UpsertBatch(ctx context.Context, items []domain.Metrics) (int,
 	return len(valid), nil
 }
 
+// Snapshot returns all known metrics.
 func (s *Service) Snapshot(ctx context.Context) (domain.Snapshot, error) {
 	return s.repo.Snapshot(ctx)
+}
+
+func (s *Service) notifyAudit(ctx context.Context, names []string) {
+	if s == nil || s.auditor == nil {
+		return
+	}
+	uniq := dedupNames(names)
+	if len(uniq) == 0 {
+		return
+	}
+	var ts int64
+	if s.now != nil {
+		ts = s.now().Unix()
+	}
+	evt := audit.Event{
+		Timestamp: ts,
+		Metrics:   uniq,
+		IPAddress: audit.ClientIPFromContext(ctx),
+	}
+	s.enqueueAudit(ctx, evt)
+}
+
+func (s *Service) enqueueAudit(ctx context.Context, evt audit.Event) {
+	if s.auditQueue == nil {
+		s.auditor.Publish(ctx, evt)
+		return
+	}
+	select {
+	case s.auditQueue <- auditEvent{ctx: ctx, evt: evt}:
+	default:
+		log.Printf("metrics: audit queue full, dropping event (%d metrics)", len(evt.Metrics))
+	}
+}
+
+func dedupNames(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
+	slices.Sort(names)
+	uniq := names[:0]
+	var last string
+	for _, name := range names {
+		if name == "" || name == last {
+			continue
+		}
+		uniq = append(uniq, name)
+		last = name
+	}
+	return uniq
 }

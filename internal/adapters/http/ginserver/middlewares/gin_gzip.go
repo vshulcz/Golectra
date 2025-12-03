@@ -19,13 +19,16 @@ func (g *gzipReadCloser) Read(p []byte) (int, error) {
 }
 
 func (g *gzipReadCloser) Close() error {
-	g.gz.Close()
+	if err := g.gz.Close(); err != nil {
+		return err
+	}
 	if g.raw != nil {
 		return g.raw.Close()
 	}
 	return nil
 }
 
+// GzipRequest transparently decompresses gzipped request bodies before other handlers run.
 func GzipRequest() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if enc := strings.ToLower(c.GetHeader("Content-Encoding")); strings.Contains(enc, "gzip") {
@@ -94,6 +97,7 @@ func (w *gzipResponseWriter) Close() error {
 	return nil
 }
 
+// GzipResponse compresses JSON or HTML responses when the client advertises gzip support.
 func GzipResponse() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		accept := strings.Contains(strings.ToLower(c.GetHeader("Accept-Encoding")), "gzip")
@@ -104,6 +108,8 @@ func GzipResponse() gin.HandlerFunc {
 		grw := &gzipResponseWriter{ResponseWriter: c.Writer, acceptGzip: true}
 		c.Writer = grw
 		c.Next()
-		grw.Close()
+		if err := grw.Close(); err != nil {
+			_ = c.Error(err)
+		}
 	}
 }
