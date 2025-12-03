@@ -1,5 +1,12 @@
 # Golectra
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/vshulcz/Golectra)](https://goreportcard.com/report/github.com/vshulcz/Golectra)
+[![codecov](https://codecov.io/gh/vshulcz/Golectra/branch/main/graph/badge.svg)](https://codecov.io/gh/vshulcz/Golectra)
+[![CI](https://github.com/vshulcz/Golectra/workflows/autotests/badge.svg)](https://github.com/vshulcz/Golectra/actions)
+[![Lint](https://github.com/vshulcz/Golectra/workflows/lint/badge.svg)](https://github.com/vshulcz/Golectra/actions)
+[![Go Reference](https://pkg.go.dev/badge/github.com/vshulcz/Golectra.svg)](https://pkg.go.dev/github.com/vshulcz/Golectra)
+[![License](https://img.shields.io/github/license/vshulcz/Golectra)](LICENSE)
+
 Golectra is a tiny, self-hosted metrics stack in pure Go:
 a lightweight agent collects Go runtime + host metrics and ships them (gzipped JSON) to a server with a simple HTTP API and optional integrity checks.
 
