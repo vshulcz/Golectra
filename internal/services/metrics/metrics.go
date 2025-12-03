@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,7 +50,8 @@ func (s *Service) Get(ctx context.Context, mType, id string) (domain.Metrics, er
 }
 
 func (s *Service) Upsert(ctx context.Context, m domain.Metrics) (domain.Metrics, error) {
-	if strings.TrimSpace(m.ID) == "" {
+	m.ID = strings.TrimSpace(m.ID)
+	if m.ID == "" {
 		return domain.Metrics{}, domain.ErrNotFound
 	}
 	switch m.MType {
@@ -84,10 +86,13 @@ func (s *Service) Upsert(ctx context.Context, m domain.Metrics) (domain.Metrics,
 
 func (s *Service) UpsertBatch(ctx context.Context, items []domain.Metrics) (int, error) {
 	valid := make([]domain.Metrics, 0, len(items))
+	names := make([]string, 0, len(items))
 	for _, it := range items {
-		if strings.TrimSpace(it.ID) == "" {
+		id := strings.TrimSpace(it.ID)
+		if id == "" {
 			continue
 		}
+		it.ID = id
 		switch it.MType {
 		case string(domain.Gauge):
 			if it.Value == nil {
@@ -101,6 +106,7 @@ func (s *Service) UpsertBatch(ctx context.Context, items []domain.Metrics) (int,
 			continue
 		}
 		valid = append(valid, it)
+		names = append(names, it.ID)
 	}
 	if len(valid) == 0 {
 		return 0, domain.ErrInvalidType
@@ -108,7 +114,7 @@ func (s *Service) UpsertBatch(ctx context.Context, items []domain.Metrics) (int,
 	if err := s.repo.UpdateMany(ctx, valid); err != nil {
 		return 0, err
 	}
-	s.notifyAudit(ctx, metricNames(valid))
+	s.notifyAudit(ctx, names)
 	if s.onChanged != nil {
 		if snap, err := s.repo.Snapshot(ctx); err == nil {
 			s.onChanged(ctx, snap)
@@ -141,29 +147,19 @@ func (s *Service) notifyAudit(ctx context.Context, names []string) {
 	s.auditor.Publish(ctx, evt)
 }
 
-func metricNames(items []domain.Metrics) []string {
-	res := make([]string, 0, len(items))
-	for _, it := range items {
-		if strings.TrimSpace(it.ID) == "" {
-			continue
-		}
-		res = append(res, it.ID)
-	}
-	return res
-}
-
 func dedupNames(names []string) []string {
-	seen := make(map[string]struct{}, len(names))
-	res := make([]string, 0, len(names))
-	for _, name := range names {
-		if strings.TrimSpace(name) == "" {
-			continue
-		}
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		res = append(res, name)
+	if len(names) == 0 {
+		return nil
 	}
-	return res
+	slices.Sort(names)
+	uniq := names[:0]
+	var last string
+	for _, name := range names {
+		if name == "" || name == last {
+			continue
+		}
+		uniq = append(uniq, name)
+		last = name
+	}
+	return uniq
 }
