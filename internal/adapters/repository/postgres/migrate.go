@@ -10,6 +10,7 @@ import (
 //go:embed migrations/*.sql
 var embedMigrations embed.FS
 
+// Migrate applies the embedded Goose migrations to the provided database.
 func Migrate(db *sql.DB) error {
 	goose.SetBaseFS(embedMigrations)
 	if err := goose.SetDialect("postgres"); err != nil {

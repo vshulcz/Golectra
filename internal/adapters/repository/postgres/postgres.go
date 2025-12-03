@@ -16,6 +16,7 @@ import (
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
+// Repo persists metrics in Postgres with retryable operations.
 type Repo struct {
 	db *sql.DB
 }
@@ -40,10 +41,12 @@ var retryablePGCodes = map[string]struct{}{
 	pgerrcode.QueryCanceled:                                 {},
 }
 
+// New returns a Postgres-backed repository.
 func New(db *sql.DB) *Repo {
 	return &Repo{db: db}
 }
 
+// GetGauge reads a single gauge value by name.
 func (r *Repo) GetGauge(ctx context.Context, n string) (float64, error) {
 	const q = `SELECT value FROM metrics WHERE id=$1 AND mtype=$2`
 	var v sql.NullFloat64
@@ -63,6 +66,7 @@ func (r *Repo) GetGauge(ctx context.Context, n string) (float64, error) {
 	return v.Float64, nil
 }
 
+// GetCounter reads a single counter value by name.
 func (r *Repo) GetCounter(ctx context.Context, n string) (int64, error) {
 	const q = `SELECT delta FROM metrics WHERE id=$1 AND mtype=$2`
 	var d sql.NullInt64
@@ -82,6 +86,7 @@ func (r *Repo) GetCounter(ctx context.Context, n string) (int64, error) {
 	return d.Int64, nil
 }
 
+// SetGauge upserts a gauge value.
 func (r *Repo) SetGauge(ctx context.Context, n string, v float64) error {
 	const q = `
 INSERT INTO metrics (id, mtype, value, delta, updated_at)
@@ -95,6 +100,7 @@ DO UPDATE SET mtype=$2, value=EXCLUDED.value, delta=NULL, updated_at=now();`
 	return misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, op)
 }
 
+// AddCounter increments (or creates) the named counter.
 func (r *Repo) AddCounter(ctx context.Context, n string, d int64) error {
 	const q = `
 INSERT INTO metrics (id, mtype, value, delta, updated_at)
@@ -108,6 +114,7 @@ DO UPDATE SET mtype=$2, value=NULL, delta=COALESCE(metrics.delta,0)+EXCLUDED.del
 	return misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, op)
 }
 
+// UpdateMany atomically applies a batch of metrics inside a transaction.
 func (r *Repo) UpdateMany(ctx context.Context, items []domain.Metrics) error {
 	if len(items) == 0 {
 		return nil
@@ -160,6 +167,7 @@ DO UPDATE SET mtype=$2, value=NULL, delta=COALESCE(metrics.delta,0)+EXCLUDED.del
 	return misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, attempt)
 }
 
+// Snapshot loads all stored metrics and returns them grouped by type.
 func (r *Repo) Snapshot(ctx context.Context) (domain.Snapshot, error) {
 	const q = `SELECT id, mtype, value, delta FROM metrics`
 	resultG := map[string]float64{}
@@ -208,6 +216,7 @@ func (r *Repo) Snapshot(ctx context.Context) (domain.Snapshot, error) {
 	return domain.Snapshot{Gauges: resultG, Counters: resultC}, nil
 }
 
+// Ping verifies the database connection using a short-lived context.
 func (r *Repo) Ping(ctx context.Context) error {
 	if r.db == nil {
 		return errors.New("db not configured")
@@ -220,6 +229,7 @@ func (r *Repo) Ping(ctx context.Context) error {
 	return misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, op)
 }
 
+// IsRetryable reports whether the error should trigger a retry according to Postgres semantics.
 func IsRetryable(err error) bool {
 	return isRetryablePG(err)
 }

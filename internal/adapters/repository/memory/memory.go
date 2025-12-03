@@ -10,6 +10,7 @@ import (
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
+// Repo keeps metrics in memory with coarse-grained RW locking.
 type Repo struct {
 	gauges   map[string]float64
 	counters map[string]int64
@@ -18,6 +19,7 @@ type Repo struct {
 
 var _ ports.MetricsRepo = (*Repo)(nil)
 
+// New returns an empty in-memory repository.
 func New() *Repo {
 	return &Repo{
 		gauges:   make(map[string]float64),
@@ -25,6 +27,7 @@ func New() *Repo {
 	}
 }
 
+// GetGauge returns the current gauge value or domain.ErrNotFound.
 func (r *Repo) GetGauge(_ context.Context, name string) (float64, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -35,6 +38,7 @@ func (r *Repo) GetGauge(_ context.Context, name string) (float64, error) {
 	return v, nil
 }
 
+// GetCounter returns the current counter delta or domain.ErrNotFound.
 func (r *Repo) GetCounter(_ context.Context, name string) (int64, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -45,6 +49,7 @@ func (r *Repo) GetCounter(_ context.Context, name string) (int64, error) {
 	return v, nil
 }
 
+// SetGauge stores the provided gauge value.
 func (r *Repo) SetGauge(_ context.Context, name string, value float64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -52,6 +57,7 @@ func (r *Repo) SetGauge(_ context.Context, name string, value float64) error {
 	return nil
 }
 
+// AddCounter accumulates the counter delta.
 func (r *Repo) AddCounter(_ context.Context, name string, delta int64) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -59,6 +65,7 @@ func (r *Repo) AddCounter(_ context.Context, name string, delta int64) error {
 	return nil
 }
 
+// UpdateMany applies a batch of gauge/counter updates in-place.
 func (r *Repo) UpdateMany(_ context.Context, items []domain.Metrics) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -78,6 +85,7 @@ func (r *Repo) UpdateMany(_ context.Context, items []domain.Metrics) error {
 	return nil
 }
 
+// Snapshot copies the current metrics maps to avoid exposing internal state.
 func (r *Repo) Snapshot(_ context.Context) (domain.Snapshot, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -88,6 +96,7 @@ func (r *Repo) Snapshot(_ context.Context) (domain.Snapshot, error) {
 	return domain.Snapshot{Gauges: g, Counters: c}, nil
 }
 
+// Ping reports that the in-memory store is not backed by a real database.
 func (*Repo) Ping(context.Context) error {
 	return errors.New("db not configured")
 }

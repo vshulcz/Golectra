@@ -21,6 +21,7 @@ import (
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
+// Client publishes metrics to the server using gzipped JSON requests.
 type Client struct {
 	key  string
 	base *url.URL
@@ -42,6 +43,7 @@ var (
 	}
 )
 
+// New normalizes the base address, configures the HTTP client, and returns a Client instance.
 func New(serverAddr string, hc *http.Client, key string) (*Client, error) {
 	if hc == nil {
 		hc = &http.Client{Timeout: 10 * time.Second}
@@ -66,10 +68,12 @@ func (c *Client) endpoint(path string) string {
 	return u.String()
 }
 
+// SendOne sends a single metric to the /update endpoint.
 func (c *Client) SendOne(ctx context.Context, m domain.Metrics) error {
 	return c.doGzJSON(ctx, "/update", m)
 }
 
+// SendBatch sends all metrics to the /updates endpoint in one gzipped payload.
 func (c *Client) SendBatch(ctx context.Context, metrics []domain.Metrics) error {
 	if len(metrics) == 0 {
 		return nil

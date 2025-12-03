@@ -18,6 +18,7 @@ const (
 	defaultRestore            = false
 )
 
+// ServerConfig describes how the HTTP server listens, stores data, and emits audit logs.
 type ServerConfig struct {
 	Address   string
 	File      string
@@ -29,7 +30,7 @@ type ServerConfig struct {
 	AuditURL  string
 }
 
-// LoadServerConfig - ENV > CLI > defaults
+// LoadServerConfig resolves CLI flags, environment variables, and defaults (ENV > CLI > defaults).
 func LoadServerConfig(args []string, out io.Writer) (ServerConfig, error) {
 	if out == nil {
 		out = io.Discard

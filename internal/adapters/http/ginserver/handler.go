@@ -15,10 +15,12 @@ import (
 	"github.com/vshulcz/Golectra/internal/services/metrics"
 )
 
+// Handler exposes HTTP endpoints for metric collection and inspection.
 type Handler struct {
 	svc *metrics.Service
 }
 
+// NewHandler wires a metrics service into a gin-compatible HTTP handler.
 func NewHandler(svc *metrics.Service) *Handler {
 	return &Handler{svc: svc}
 }
@@ -46,7 +48,16 @@ func decodeMetricsBatch(r io.Reader) ([]domain.Metrics, func(), error) {
 	return items, cleanup, nil
 }
 
-// POST /update/:type/:name/:value
+func cloneMetrics(items []domain.Metrics) []domain.Metrics {
+	if len(items) == 0 {
+		return nil
+	}
+	clone := make([]domain.Metrics, len(items))
+	copy(clone, items)
+	return clone
+}
+
+// UpdateMetric handles `POST /update/:type/:name/:value` with plain-text payloads.
 func (h *Handler) UpdateMetric(c *gin.Context) {
 	metricType, metricName, metricValue := c.Param("type"), c.Param("name"), c.Param("value")
 	if strings.TrimSpace(metricName) == "" {
@@ -84,7 +95,7 @@ func (h *Handler) UpdateMetric(c *gin.Context) {
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte("ok"))
 }
 
-// GET /value/:type/:name
+// GetMetric handles `GET /value/:type/:name` returning a plain-text metric value.
 func (h *Handler) GetMetric(c *gin.Context) {
 	metricType, metricName := c.Param("type"), c.Param("name")
 
@@ -104,6 +115,7 @@ func (h *Handler) GetMetric(c *gin.Context) {
 	}
 }
 
+// Index renders a basic HTML dashboard with current gauge and counter values.
 func (h *Handler) Index(c *gin.Context) {
 	snap, err := h.svc.Snapshot(c.Request.Context())
 	if err != nil {
@@ -142,7 +154,7 @@ func (h *Handler) Index(c *gin.Context) {
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(sb.String()))
 }
 
-// POST /update  (application/json)
+// UpdateMetricJSON handles `POST /update` requests with a JSON metric payload.
 func (h *Handler) UpdateMetricJSON(c *gin.Context) {
 	var m domain.Metrics
 	if err := c.ShouldBindJSON(&m); err != nil || strings.TrimSpace(m.ID) == "" {
@@ -159,7 +171,7 @@ func (h *Handler) UpdateMetricJSON(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
-// POST /value  (application/json)
+// GetMetricJSON handles `POST /value` requests returning a metric as JSON.
 func (h *Handler) GetMetricJSON(c *gin.Context) {
 	var q domain.Metrics
 	if err := c.ShouldBindJSON(&q); err != nil || strings.TrimSpace(q.ID) == "" {
@@ -175,7 +187,7 @@ func (h *Handler) GetMetricJSON(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
-// POST /updates (application/json)
+// UpdateMetricsBatchJSON handles `POST /updates` with a batch of metrics in JSON.
 func (h *Handler) UpdateMetricsBatchJSON(c *gin.Context) {
 	items, release, err := decodeMetricsBatch(c.Request.Body)
 	if err != nil {
@@ -183,6 +195,7 @@ func (h *Handler) UpdateMetricsBatchJSON(c *gin.Context) {
 		return
 	}
 	defer release()
+	items = cloneMetrics(items)
 	ctx := audit.WithClientIP(c.Request.Context(), c.ClientIP())
 	updated, err := h.svc.UpsertBatch(ctx, items)
 	if err != nil {
@@ -192,7 +205,7 @@ func (h *Handler) UpdateMetricsBatchJSON(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"updated": updated})
 }
 
-// GET /ping
+// Ping proxies `GET /ping` to the storage health check.
 func (h *Handler) Ping(c *gin.Context) {
 	if err := h.svc.Ping(c.Request.Context()); err != nil {
 		c.String(http.StatusInternalServerError, "db ping error: %v", err)
@@ -201,7 +214,7 @@ func (h *Handler) Ping(c *gin.Context) {
 	c.String(http.StatusOK, "ok")
 }
 
-// GET /api/v1/snapshot
+// SnapshotJSON handles `GET /api/v1/snapshot` and returns the current snapshot as JSON.
 func (h *Handler) SnapshotJSON(c *gin.Context) {
 	snap, err := h.svc.Snapshot(c.Request.Context())
 	if err != nil {

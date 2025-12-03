@@ -9,6 +9,7 @@ import (
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
+// BatchPublisher fans out metric batches to worker goroutines with automatic fallback.
 type BatchPublisher struct {
 	pub     ports.Publisher
 	workers int
@@ -16,6 +17,7 @@ type BatchPublisher struct {
 	wg      sync.WaitGroup
 }
 
+// NewBatchPublisher returns a worker pool wrapper over the publisher.
 func NewBatchPublisher(pub ports.Publisher, workers int) *BatchPublisher {
 	if workers < 1 {
 		workers = 1
@@ -28,6 +30,7 @@ func NewBatchPublisher(pub ports.Publisher, workers int) *BatchPublisher {
 	}
 }
 
+// Start launches worker goroutines that forward submitted batches.
 func (bp *BatchPublisher) Start(ctx context.Context) {
 	for i := 0; i < bp.workers; i++ {
 		bp.wg.Add(1)
@@ -50,11 +53,13 @@ func (bp *BatchPublisher) Start(ctx context.Context) {
 	}
 }
 
+// Stop waits for all workers to finish processing.
 func (bp *BatchPublisher) Stop() {
 	close(bp.jobs)
 	bp.wg.Wait()
 }
 
+// Submit enqueues a batch for asynchronous delivery.
 func (bp *BatchPublisher) Submit(batch []domain.Metrics) {
 	bp.jobs <- batch
 }
