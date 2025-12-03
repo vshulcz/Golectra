@@ -2,8 +2,10 @@ package metrics
 
 import (
 	"context"
+	"log"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vshulcz/Golectra/internal/domain"
@@ -17,11 +19,56 @@ type Service struct {
 	onChanged func(context.Context, domain.Snapshot)
 	auditor   audit.Publisher
 	now       func() time.Time
+
+	auditQueue chan auditEvent
+	auditStop  context.CancelFunc
+	auditWG    sync.WaitGroup
 }
 
 // New builds a metrics Service with repository, snapshot hook, and optional auditor.
 func New(repo ports.MetricsRepo, onChanged func(context.Context, domain.Snapshot), auditor audit.Publisher) *Service {
-	return &Service{repo: repo, onChanged: onChanged, auditor: auditor, now: time.Now}
+	s := &Service{repo: repo, onChanged: onChanged, auditor: auditor, now: time.Now}
+	s.initAuditDispatcher()
+	return s
+}
+
+type auditEvent struct {
+	ctx context.Context
+	evt audit.Event
+}
+
+const auditQueueSize = 128
+
+func (s *Service) initAuditDispatcher() {
+	if s == nil || s.auditor == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.auditQueue = make(chan auditEvent, auditQueueSize)
+	s.auditStop = cancel
+	s.auditWG.Add(1)
+	go func() {
+		defer s.auditWG.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-s.auditQueue:
+				s.auditor.Publish(msg.ctx, msg.evt)
+			}
+		}
+	}()
+}
+
+// Close stops background workers and releases resources.
+func (s *Service) Close() {
+	if s == nil || s.auditStop == nil {
+		return
+	}
+	s.auditStop()
+	s.auditWG.Wait()
+	s.auditStop = nil
+	s.auditQueue = nil
 }
 
 // Ping delegates to the underlying repository health check.
@@ -151,7 +198,19 @@ func (s *Service) notifyAudit(ctx context.Context, names []string) {
 		Metrics:   uniq,
 		IPAddress: audit.ClientIPFromContext(ctx),
 	}
-	s.auditor.Publish(ctx, evt)
+	s.enqueueAudit(ctx, evt)
+}
+
+func (s *Service) enqueueAudit(ctx context.Context, evt audit.Event) {
+	if s.auditQueue == nil {
+		s.auditor.Publish(ctx, evt)
+		return
+	}
+	select {
+	case s.auditQueue <- auditEvent{ctx: ctx, evt: evt}:
+	default:
+		log.Printf("metrics: audit queue full, dropping event (%d metrics)", len(evt.Metrics))
+	}
 }
 
 func dedupNames(names []string) []string {

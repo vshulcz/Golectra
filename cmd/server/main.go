@@ -52,6 +52,7 @@ func run(args []string) error {
 
 	auditor := buildAuditor(cfg, logger)
 	svc := metrics.New(repo, onChanged, auditor)
+	defer svc.Close()
 	h := ginserver.NewHandler(svc)
 
 	r := ginserver.NewRouter(h, logger,

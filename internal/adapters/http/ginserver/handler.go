@@ -48,6 +48,15 @@ func decodeMetricsBatch(r io.Reader) ([]domain.Metrics, func(), error) {
 	return items, cleanup, nil
 }
 
+func cloneMetrics(items []domain.Metrics) []domain.Metrics {
+	if len(items) == 0 {
+		return nil
+	}
+	clone := make([]domain.Metrics, len(items))
+	copy(clone, items)
+	return clone
+}
+
 // UpdateMetric handles `POST /update/:type/:name/:value` with plain-text payloads.
 func (h *Handler) UpdateMetric(c *gin.Context) {
 	metricType, metricName, metricValue := c.Param("type"), c.Param("name"), c.Param("value")
@@ -186,6 +195,7 @@ func (h *Handler) UpdateMetricsBatchJSON(c *gin.Context) {
 		return
 	}
 	defer release()
+	items = cloneMetrics(items)
 	ctx := audit.WithClientIP(c.Request.Context(), c.ClientIP())
 	updated, err := h.svc.UpsertBatch(ctx, items)
 	if err != nil {

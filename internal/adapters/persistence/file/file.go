@@ -78,9 +78,8 @@ func writeJSONAtomic(path string, items []domain.Metrics) (retErr error) {
 	}
 	tmpName := tmp.Name()
 	cleanup := true
-	closed := false
 	defer func() {
-		if !closed {
+		if tmp != nil {
 			if cerr := tmp.Close(); cerr != nil && retErr == nil {
 				retErr = fmt.Errorf("close tmp: %w", cerr)
 			}
@@ -99,7 +98,7 @@ func writeJSONAtomic(path string, items []domain.Metrics) (retErr error) {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close tmp: %w", err)
 	}
-	closed = true
+	tmp = nil
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("rename: %w", err)
 	}

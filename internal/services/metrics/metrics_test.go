@@ -58,6 +58,16 @@ func (f *fakeAuditor) Events() []audit.Event {
 	return out
 }
 
+func (f *fakeAuditor) WaitForEvents(n int, timeout time.Duration) []audit.Event {
+	deadline := time.Now().Add(timeout)
+	for {
+		if events := f.Events(); len(events) >= n || time.Now().After(deadline) {
+			return events
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		gauges:        map[string]float64{},
@@ -426,6 +436,7 @@ func TestService_Upsert_EmitsAudit(t *testing.T) {
 	repo := newFakeRepo()
 	aud := &fakeAuditor{}
 	svc := New(repo, nil, aud)
+	t.Cleanup(svc.Close)
 	svc.now = func() time.Time { return time.Unix(99, 0) }
 
 	ctx := audit.WithClientIP(context.Background(), "10.0.0.1")
@@ -434,7 +445,7 @@ func TestService_Upsert_EmitsAudit(t *testing.T) {
 		t.Fatalf("Upsert err: %v", err)
 	}
 
-	events := aud.Events()
+	events := aud.WaitForEvents(1, time.Second)
 	if len(events) != 1 {
 		t.Fatalf("expected 1 audit event, got %d", len(events))
 	}
@@ -454,6 +465,7 @@ func TestService_UpsertBatch_EmitsAuditDedup(t *testing.T) {
 	repo := newFakeRepo()
 	aud := &fakeAuditor{}
 	svc := New(repo, nil, aud)
+	t.Cleanup(svc.Close)
 	svc.now = func() time.Time { return time.Unix(5, 0) }
 
 	items := []domain.Metrics{
@@ -471,7 +483,7 @@ func TestService_UpsertBatch_EmitsAuditDedup(t *testing.T) {
 		t.Fatalf("updated=%d want 3", updated)
 	}
 
-	events := aud.Events()
+	events := aud.WaitForEvents(1, time.Second)
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
