@@ -21,26 +21,32 @@ func TestLoadServerConfig(t *testing.T) {
 			args: []string{},
 			env:  map[string]string{},
 			want: ServerConfig{
-				Address:  defaultListenAndServeAddr,
-				File:     defaultFilePath,
-				Interval: ds(defaultStoreInterval),
-				Restore:  defaultRestore,
+				Address:   defaultListenAndServeAddr,
+				File:      defaultFilePath,
+				Interval:  ds(defaultStoreInterval),
+				Restore:   defaultRestore,
+				AuditFile: "",
+				AuditURL:  "",
 			},
 		},
 		{
 			name: "env override flags",
-			args: []string{"-a", "http://127.0.0.1:9090", "-i", "42", "-f", "flags.json", "-r"},
+			args: []string{"-a", "http://127.0.0.1:9090", "-i", "42", "-f", "flags.json", "-r", "-audit-file", "flags.log"},
 			env: map[string]string{
 				"ADDRESS":           "0.0.0.0:1234",
 				"STORE_INTERVAL":    "777s",
 				"FILE_STORAGE_PATH": "env.json",
 				"RESTORE":           "false",
+				"AUDIT_FILE":        "env-audit.log",
+				"AUDIT_URL":         "https://audit.example.com",
 			},
 			want: ServerConfig{
-				Address:  "0.0.0.0:1234",
-				File:     "env.json",
-				Interval: 777 * time.Second,
-				Restore:  false,
+				Address:   "0.0.0.0:1234",
+				File:      "env.json",
+				Interval:  777 * time.Second,
+				Restore:   false,
+				AuditFile: "env-audit.log",
+				AuditURL:  "https://audit.example.com",
 			},
 		},
 		{
@@ -51,12 +57,15 @@ func TestLoadServerConfig(t *testing.T) {
 				"STORE_INTERVAL":    "15s",
 				"FILE_STORAGE_PATH": "from-env.json",
 				"RESTORE":           "true",
+				"AUDIT_FILE":        "/tmp/audit.log",
 			},
 			want: ServerConfig{
-				Address:  "0.0.0.0:5050",
-				File:     "from-env.json",
-				Interval: 15 * time.Second,
-				Restore:  true,
+				Address:   "0.0.0.0:5050",
+				File:      "from-env.json",
+				Interval:  15 * time.Second,
+				Restore:   true,
+				AuditFile: "/tmp/audit.log",
+				AuditURL:  "",
 			},
 		},
 		{
@@ -71,13 +80,15 @@ func TestLoadServerConfig(t *testing.T) {
 		},
 		{
 			name: "interval == 0 via flag is allowed (sync mode)",
-			args: []string{"-i", "0"},
+			args: []string{"-i", "0", "-audit-url", "https://audit"},
 			env:  map[string]string{},
 			want: ServerConfig{
-				Address:  defaultListenAndServeAddr,
-				File:     defaultFilePath,
-				Interval: 0,
-				Restore:  defaultRestore,
+				Address:   defaultListenAndServeAddr,
+				File:      defaultFilePath,
+				Interval:  0,
+				Restore:   defaultRestore,
+				AuditFile: "",
+				AuditURL:  "https://audit",
 			},
 		},
 		{
@@ -85,27 +96,31 @@ func TestLoadServerConfig(t *testing.T) {
 			args: []string{},
 			env:  map[string]string{"RESTORE": "true"},
 			want: ServerConfig{
-				Address:  defaultListenAndServeAddr,
-				File:     defaultFilePath,
-				Interval: ds(defaultStoreInterval),
-				Restore:  true,
+				Address:   defaultListenAndServeAddr,
+				File:      defaultFilePath,
+				Interval:  ds(defaultStoreInterval),
+				Restore:   true,
+				AuditFile: "",
+				AuditURL:  "",
 			},
 		},
 		{
 			name: "address accepts plain port (normalized to :port)",
 			args: []string{"-a", "9090"},
 			want: ServerConfig{
-				Address:  ":9090",
-				File:     defaultFilePath,
-				Interval: ds(defaultStoreInterval),
-				Restore:  defaultRestore,
+				Address:   ":9090",
+				File:      defaultFilePath,
+				Interval:  ds(defaultStoreInterval),
+				Restore:   defaultRestore,
+				AuditFile: "",
+				AuditURL:  "",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, k := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE"} {
+			for _, k := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL"} {
 				t.Setenv(k, "")
 			}
 			for k, v := range tt.env {
@@ -137,6 +152,12 @@ func TestLoadServerConfig(t *testing.T) {
 			}
 			if got.Restore != tt.want.Restore {
 				t.Errorf("Restore: want %v, got %v", tt.want.Restore, got.Restore)
+			}
+			if got.AuditFile != tt.want.AuditFile {
+				t.Errorf("AuditFile: want %q, got %q", tt.want.AuditFile, got.AuditFile)
+			}
+			if got.AuditURL != tt.want.AuditURL {
+				t.Errorf("AuditURL: want %q, got %q", tt.want.AuditURL, got.AuditURL)
 			}
 		})
 	}

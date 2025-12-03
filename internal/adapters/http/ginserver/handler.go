@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/vshulcz/Golectra/internal/domain"
+	"github.com/vshulcz/Golectra/internal/services/audit"
 	"github.com/vshulcz/Golectra/internal/services/metrics"
 )
 
@@ -49,7 +50,8 @@ func (h *Handler) UpdateMetric(c *gin.Context) {
 		c.String(http.StatusBadRequest, "bad request")
 		return
 	}
-	if _, err := h.svc.Upsert(c.Request.Context(), m); err != nil {
+	ctx := audit.WithClientIP(c.Request.Context(), c.ClientIP())
+	if _, err := h.svc.Upsert(ctx, m); err != nil {
 		httpError(c, err)
 		return
 	}
@@ -122,7 +124,8 @@ func (h *Handler) UpdateMetricJSON(c *gin.Context) {
 		return
 	}
 
-	res, err := h.svc.Upsert(c.Request.Context(), m)
+	ctx := audit.WithClientIP(c.Request.Context(), c.ClientIP())
+	res, err := h.svc.Upsert(ctx, m)
 	if err != nil {
 		httpError(c, err)
 		return
@@ -153,7 +156,8 @@ func (h *Handler) UpdateMetricsBatchJSON(c *gin.Context) {
 		c.String(http.StatusBadRequest, "bad request")
 		return
 	}
-	updated, err := h.svc.UpsertBatch(c.Request.Context(), items)
+	ctx := audit.WithClientIP(c.Request.Context(), c.ClientIP())
+	updated, err := h.svc.UpsertBatch(ctx, items)
 	if err != nil {
 		httpError(c, err)
 		return

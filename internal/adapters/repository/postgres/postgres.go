@@ -22,6 +22,24 @@ type Repo struct {
 
 var _ ports.MetricsRepo = (*Repo)(nil)
 
+var retryablePGCodes = map[string]struct{}{
+	pgerrcode.ConnectionException:                           {},
+	pgerrcode.ConnectionDoesNotExist:                        {},
+	pgerrcode.ConnectionFailure:                             {},
+	pgerrcode.SQLClientUnableToEstablishSQLConnection:       {},
+	pgerrcode.SQLServerRejectedEstablishmentOfSQLConnection: {},
+	pgerrcode.TransactionResolutionUnknown:                  {},
+	pgerrcode.ProtocolViolation:                             {},
+	pgerrcode.SerializationFailure:                          {},
+	pgerrcode.DeadlockDetected:                              {},
+	pgerrcode.LockNotAvailable:                              {},
+	pgerrcode.TooManyConnections:                            {},
+	pgerrcode.AdminShutdown:                                 {},
+	pgerrcode.CrashShutdown:                                 {},
+	pgerrcode.CannotConnectNow:                              {},
+	pgerrcode.QueryCanceled:                                 {},
+}
+
 func New(db *sql.DB) *Repo {
 	return &Repo{db: db}
 }
@@ -112,7 +130,7 @@ DO UPDATE SET mtype=$2, value=NULL, delta=COALESCE(metrics.delta,0)+EXCLUDED.del
 			return err
 		}
 		defer func() {
-			tx.Rollback()
+			_ = tx.Rollback()
 		}()
 
 		for _, it := range items {
@@ -144,42 +162,50 @@ DO UPDATE SET mtype=$2, value=NULL, delta=COALESCE(metrics.delta,0)+EXCLUDED.del
 
 func (r *Repo) Snapshot(ctx context.Context) (domain.Snapshot, error) {
 	const q = `SELECT id, mtype, value, delta FROM metrics`
-	g := map[string]float64{}
-	c := map[string]int64{}
+	resultG := map[string]float64{}
+	resultC := map[string]int64{}
 
-	var rows *sql.Rows
 	op := func() error {
-		var err error
-		rows, err = r.db.QueryContext(ctx, q)
-		return err
+		rows, err := r.db.QueryContext(ctx, q)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = rows.Close()
+		}()
+
+		g := map[string]float64{}
+		c := map[string]int64{}
+
+		var id, mtype string
+		var (
+			v sql.NullFloat64
+			d sql.NullInt64
+		)
+		for rows.Next() {
+			if err := rows.Scan(&id, &mtype, &v, &d); err != nil {
+				continue
+			}
+			switch mtype {
+			case string(domain.Gauge):
+				if v.Valid {
+					g[id] = v.Float64
+				}
+			case string(domain.Counter):
+				if d.Valid {
+					c[id] = d.Int64
+				}
+			default:
+			}
+		}
+		resultG = g
+		resultC = c
+		return nil
 	}
 	if err := misc.Retry(ctx, misc.DefaultBackoff, isRetryablePG, op); err != nil {
-		return domain.Snapshot{Gauges: g, Counters: c}, err
+		return domain.Snapshot{Gauges: resultG, Counters: resultC}, err
 	}
-	defer rows.Close()
-
-	var id, mtype string
-	var (
-		v sql.NullFloat64
-		d sql.NullInt64
-	)
-	for rows.Next() {
-		if err := rows.Scan(&id, &mtype, &v, &d); err != nil {
-			continue
-		}
-		switch mtype {
-		case string(domain.Gauge):
-			if v.Valid {
-				g[id] = v.Float64
-			}
-		case string(domain.Counter):
-			if d.Valid {
-				c[id] = d.Int64
-			}
-		default:
-		}
-	}
-	return domain.Snapshot{Gauges: g, Counters: c}, nil
+	return domain.Snapshot{Gauges: resultG, Counters: resultC}, nil
 }
 
 func (r *Repo) Ping(ctx context.Context) error {
@@ -211,35 +237,20 @@ func isRetryablePG(err error) bool {
 	}
 	var pqe *pq.Error
 	if errors.As(err, &pqe) {
-		code := string(pqe.Code)
-		if code == pgerrcode.ConnectionException ||
-			code == pgerrcode.ConnectionDoesNotExist ||
-			code == pgerrcode.ConnectionFailure ||
-			code == pgerrcode.SQLClientUnableToEstablishSQLConnection ||
-			code == pgerrcode.SQLServerRejectedEstablishmentOfSQLConnection ||
-			code == pgerrcode.TransactionResolutionUnknown ||
-			code == pgerrcode.ProtocolViolation ||
-			strings.HasPrefix(code, "08") {
-			return true
-		}
+		return isRetryablePGCode(string(pqe.Code))
+	}
+	return false
+}
 
-		if code == pgerrcode.SerializationFailure ||
-			code == pgerrcode.DeadlockDetected ||
-			strings.HasPrefix(code, "40") {
-			return true
-		}
-
-		if code == pgerrcode.LockNotAvailable ||
-			code == pgerrcode.TooManyConnections {
-			return true
-		}
-
-		if code == pgerrcode.AdminShutdown ||
-			code == pgerrcode.CrashShutdown ||
-			code == pgerrcode.CannotConnectNow ||
-			code == pgerrcode.QueryCanceled {
-			return true
-		}
+func isRetryablePGCode(code string) bool {
+	if _, ok := retryablePGCodes[code]; ok {
+		return true
+	}
+	if strings.HasPrefix(code, "08") {
+		return true
+	}
+	if strings.HasPrefix(code, "40") {
+		return true
 	}
 	return false
 }

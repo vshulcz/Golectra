@@ -5,6 +5,7 @@ cmd/server/server
 *.out
 *.log
 *.tmp
+bin/
 
 # autotests
 metricstest

@@ -3,18 +3,22 @@ package metrics
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/vshulcz/Golectra/internal/domain"
 	"github.com/vshulcz/Golectra/internal/ports"
+	"github.com/vshulcz/Golectra/internal/services/audit"
 )
 
 type Service struct {
 	repo      ports.MetricsRepo
 	onChanged func(context.Context, domain.Snapshot)
+	auditor   audit.Publisher
+	now       func() time.Time
 }
 
-func New(repo ports.MetricsRepo, onChanged func(context.Context, domain.Snapshot)) *Service {
-	return &Service{repo: repo, onChanged: onChanged}
+func New(repo ports.MetricsRepo, onChanged func(context.Context, domain.Snapshot), auditor audit.Publisher) *Service {
+	return &Service{repo: repo, onChanged: onChanged, auditor: auditor, now: time.Now}
 }
 
 func (s *Service) Ping(ctx context.Context) error {
@@ -56,7 +60,11 @@ func (s *Service) Upsert(ctx context.Context, m domain.Metrics) (domain.Metrics,
 		if err := s.repo.SetGauge(ctx, m.ID, *m.Value); err != nil {
 			return domain.Metrics{}, err
 		}
-		return s.Get(ctx, m.MType, m.ID)
+		res, err := s.Get(ctx, m.MType, m.ID)
+		if err == nil {
+			s.notifyAudit(ctx, []string{m.ID})
+		}
+		return res, err
 	case string(domain.Counter):
 		if m.Delta == nil {
 			return domain.Metrics{}, domain.ErrInvalidType
@@ -64,7 +72,11 @@ func (s *Service) Upsert(ctx context.Context, m domain.Metrics) (domain.Metrics,
 		if err := s.repo.AddCounter(ctx, m.ID, *m.Delta); err != nil {
 			return domain.Metrics{}, err
 		}
-		return s.Get(ctx, m.MType, m.ID)
+		res, err := s.Get(ctx, m.MType, m.ID)
+		if err == nil {
+			s.notifyAudit(ctx, []string{m.ID})
+		}
+		return res, err
 	default:
 		return domain.Metrics{}, domain.ErrInvalidType
 	}
@@ -96,6 +108,7 @@ func (s *Service) UpsertBatch(ctx context.Context, items []domain.Metrics) (int,
 	if err := s.repo.UpdateMany(ctx, valid); err != nil {
 		return 0, err
 	}
+	s.notifyAudit(ctx, metricNames(valid))
 	if s.onChanged != nil {
 		if snap, err := s.repo.Snapshot(ctx); err == nil {
 			s.onChanged(ctx, snap)
@@ -106,4 +119,51 @@ func (s *Service) UpsertBatch(ctx context.Context, items []domain.Metrics) (int,
 
 func (s *Service) Snapshot(ctx context.Context) (domain.Snapshot, error) {
 	return s.repo.Snapshot(ctx)
+}
+
+func (s *Service) notifyAudit(ctx context.Context, names []string) {
+	if s == nil || s.auditor == nil {
+		return
+	}
+	uniq := dedupNames(names)
+	if len(uniq) == 0 {
+		return
+	}
+	var ts int64
+	if s.now != nil {
+		ts = s.now().Unix()
+	}
+	evt := audit.Event{
+		Timestamp: ts,
+		Metrics:   uniq,
+		IPAddress: audit.ClientIPFromContext(ctx),
+	}
+	s.auditor.Publish(ctx, evt)
+}
+
+func metricNames(items []domain.Metrics) []string {
+	res := make([]string, 0, len(items))
+	for _, it := range items {
+		if strings.TrimSpace(it.ID) == "" {
+			continue
+		}
+		res = append(res, it.ID)
+	}
+	return res
+}
+
+func dedupNames(names []string) []string {
+	seen := make(map[string]struct{}, len(names))
+	res := make([]string, 0, len(names))
+	for _, name := range names {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		res = append(res, name)
+	}
+	return res
 }
