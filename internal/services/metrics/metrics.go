@@ -1,3 +1,4 @@
+// Package metrics implements business logic for managing application metrics.
 package metrics
 
 import (

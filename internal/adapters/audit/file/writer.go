@@ -1,4 +1,4 @@
-package fileaudit
+package file
 
 import (
 	"context"

@@ -3,6 +3,7 @@ package ginserver
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -33,7 +34,10 @@ var metricsBatchPool = sync.Pool{
 }
 
 func decodeMetricsBatch(r io.Reader) ([]domain.Metrics, func(), error) {
-	buf := metricsBatchPool.Get().(*[]domain.Metrics)
+	buf, ok := metricsBatchPool.Get().(*[]domain.Metrics)
+	if !ok {
+		return nil, func() {}, fmt.Errorf("failed to assert type: expected *[]domain.Metrics")
+	}
 	items := (*buf)[:0]
 	dec := json.NewDecoder(r)
 	dec.DisallowUnknownFields()
