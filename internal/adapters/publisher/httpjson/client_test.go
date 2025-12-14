@@ -1,6 +1,7 @@
 package httpjson
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -864,3 +865,97 @@ type nopWriteCloser struct{ *strings.Builder }
 
 func (n *nopWriteCloser) Write(p []byte) (int, error) { return n.Builder.Write(p) }
 func (*nopWriteCloser) Close() error                  { return nil }
+
+func TestGzipBytes(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   []byte
+		wantErr bool
+	}{
+		{
+			name:    "valid input",
+			input:   []byte("test data"),
+			wantErr: false,
+		},
+		{
+			name:    "empty input",
+			input:   []byte{},
+			wantErr: false,
+		},
+		{
+			name:    "large input",
+			input:   bytes.Repeat([]byte("x"), 10000),
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			payload, err := gzipBytes(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("gzipBytes() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if err == nil && payload == nil {
+				t.Error("expected non-nil payload")
+				return
+			}
+
+			if err == nil {
+				compressed := payload.Bytes()
+				reader, err := gzip.NewReader(bytes.NewReader(compressed))
+				if err != nil {
+					t.Errorf("failed to create gzip reader: %v", err)
+					return
+				}
+				defer func() {
+					_ = reader.Close()
+				}()
+
+				decompressed := new(bytes.Buffer)
+				if _, err := decompressed.ReadFrom(reader); err != nil {
+					t.Errorf("failed to decompress: %v", err)
+					return
+				}
+
+				if !bytes.Equal(decompressed.Bytes(), tt.input) {
+					t.Errorf("decompressed data does not match original input")
+				}
+
+				payload.Release()
+			}
+		})
+	}
+}
+
+func TestCompressedPayload(t *testing.T) {
+	t.Run("bytes returns nil for nil payload", func(t *testing.T) {
+		var p *compressedPayload
+		if p.Bytes() != nil {
+			t.Error("expected nil for nil payload")
+		}
+	})
+
+	t.Run("release handles nil payload gracefully", func(t *testing.T) {
+		var p *compressedPayload
+		p.Release() // Should not panic
+	})
+
+	t.Run("bytes returns data after gzip", func(t *testing.T) {
+		payload, err := gzipBytes([]byte("test"))
+		if err != nil {
+			t.Fatalf("gzipBytes failed: %v", err)
+		}
+		defer payload.Release()
+
+		data := payload.Bytes()
+		if data == nil {
+			t.Error("expected non-nil data")
+		}
+
+		if len(data) == 0 {
+			t.Error("expected non-empty data")
+		}
+	})
+}

@@ -179,13 +179,13 @@ func hasMarker(genDoc, specDoc *ast.CommentGroup) bool {
 		for _, c := range cg.List {
 			txt := c.Text
 			txt = strings.TrimSpace(txt)
+			txt = strings.ToLower(txt)
 			txt = strings.TrimPrefix(txt, "//")
 			txt = strings.TrimPrefix(txt, "/*")
 			txt = strings.TrimSuffix(txt, "*/")
 			txt = strings.TrimSpace(txt)
 
-			txt = strings.TrimSuffix(txt, ";")
-			if strings.TrimSpace(txt) == marker {
+			if txt == "+"+marker {
 				return true
 			}
 		}
