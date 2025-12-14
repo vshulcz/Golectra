@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -14,7 +15,15 @@ import (
 	agentsvc "github.com/vshulcz/Golectra/internal/services/agent"
 )
 
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
 func main() {
+	printBuildInfo()
+
 	cfg, err := config.LoadAgentConfig(os.Args[1:], nil)
 	if err != nil {
 		log.Fatalf("failed to parse flags: %v", err)
@@ -35,4 +44,17 @@ func main() {
 	if err := runner.Run(ctx); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func na(v string) string {
+	if v == "" {
+		return "N/A"
+	}
+	return v
+}
+
+func printBuildInfo() {
+	fmt.Printf("Build version: %s\n", na(buildVersion))
+	fmt.Printf("Build date: %s\n", na(buildDate))
+	fmt.Printf("Build commit: %s\n", na(buildCommit))
 }

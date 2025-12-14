@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -19,7 +20,15 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
 func main() {
+	printBuildInfo()
+
 	if err := run(os.Args[1:]); err != nil {
 		log.Fatal(err)
 	}
@@ -114,4 +123,17 @@ func buildAuditor(cfg config.ServerConfig, logger *zap.Logger) audit.Publisher {
 		subject.Attach(client)
 	}
 	return subject
+}
+
+func na(v string) string {
+	if v == "" {
+		return "N/A"
+	}
+	return v
+}
+
+func printBuildInfo() {
+	fmt.Printf("Build version: %s\n", na(buildVersion))
+	fmt.Printf("Build date: %s\n", na(buildDate))
+	fmt.Printf("Build commit: %s\n", na(buildCommit))
 }

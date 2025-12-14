@@ -34,6 +34,25 @@ go run ./cmd/agent -a http://localhost:8080 -r 10 -p 2 -l 2
 # -r report interval (s), -p poll interval (s), -l parallel senders
 ```
 
+3) Build with version info
+To include build version, date, and commit in the binaries, use the following commands:
+
+```bash
+go build -o bin/server \
+  -ldflags "\
+    -X 'main.buildVersion=v1.2.5' \
+    -X 'main.buildDate=2025-12-14T10:00:00Z' \
+    -X 'main.buildCommit=abc1234' \
+  " ./cmd/server
+
+go build -o bin/agent \
+  -ldflags "\
+    -X 'main.buildVersion=v1.2.5' \
+    -X 'main.buildDate=2025-12-14T10:00:00Z' \
+    -X 'main.buildCommit=abc1234' \
+  " ./cmd/agent
+```
+
 Open http://localhost:8080 to see metrics.
 
 ## API (HTTP)
