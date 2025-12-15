@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"github.com/vshulcz/Golectra/internal/adapters/publisher/httpjson"
 	"github.com/vshulcz/Golectra/internal/config"
 	agentsvc "github.com/vshulcz/Golectra/internal/services/agent"
+	"github.com/vshulcz/Golectra/pkg/util"
 )
 
 var (
@@ -46,15 +46,6 @@ func main() {
 	}
 }
 
-func na(v string) string {
-	if v == "" {
-		return "N/A"
-	}
-	return v
-}
-
 func printBuildInfo() {
-	fmt.Printf("Build version: %s\n", na(buildVersion))
-	fmt.Printf("Build date: %s\n", na(buildDate))
-	fmt.Printf("Build commit: %s\n", na(buildCommit))
+	util.PrintBuildInfo(buildVersion, buildDate, buildCommit)
 }

@@ -117,13 +117,21 @@ func TestIsOsExitCall(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			pass := &analysis.Pass{
 				TypesInfo: &types.Info{
-					Uses: map[*ast.Ident]types.Object{
-						tt.callExpr.Fun.(*ast.SelectorExpr).Sel: types.NewFunc(0, types.NewPackage("os", "os"), "Exit", types.NewSignatureType(nil, nil, nil, nil, nil, false)),
-					},
+					Uses: map[*ast.Ident]types.Object{},
 				},
 			}
+
+			if selector, ok := tt.callExpr.Fun.(*ast.SelectorExpr); ok {
+				pass.TypesInfo.Uses[selector.Sel] = types.NewFunc(0, types.NewPackage("os", "os"), "Exit", types.NewSignatureType(nil, nil, nil, nil, nil, false))
+			} else {
+				t.Errorf("expected *ast.SelectorExpr, got %T", tt.callExpr.Fun)
+			}
 			if tt.name == "non os.Exit call" {
-				pass.TypesInfo.Uses[tt.callExpr.Fun.(*ast.SelectorExpr).Sel] = types.NewFunc(0, types.NewPackage("fmt", "fmt"), "Println", types.NewSignatureType(nil, nil, nil, nil, nil, false))
+				if selector, ok := tt.callExpr.Fun.(*ast.SelectorExpr); ok {
+					pass.TypesInfo.Uses[selector.Sel] = types.NewFunc(0, types.NewPackage("fmt", "fmt"), "Println", types.NewSignatureType(nil, nil, nil, nil, nil, false))
+				} else {
+					t.Errorf("expected *ast.SelectorExpr, got %T", tt.callExpr.Fun)
+				}
 			}
 			res := isOsExitCall(pass, tt.callExpr)
 			if res != tt.expectRes {

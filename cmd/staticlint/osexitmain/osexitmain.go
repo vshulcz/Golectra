@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"os"
+	"strings"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -41,6 +43,10 @@ func run(pass *analysis.Pass) (any, error) {
 			case *ast.FuncLit:
 				return false
 			case *ast.CallExpr:
+				pos := pass.Fset.Position(x.Pos())
+				if strings.Contains(pos.Filename, string(os.PathSeparator)+"go-build"+string(os.PathSeparator)) {
+					return false
+				}
 				if isOsExitCall(pass, x) {
 					pass.Reportf(x.Pos(), "It is forbidden to call os.Exit directly in main function; use return code from main instead")
 				}

@@ -84,18 +84,5 @@ func main() {
 	}
 
 	analyzers = append(analyzers, nilerr.Analyzer, forcetypeassert.Analyzer, osexitmain.Analyzer)
-
-	multichecker.Main(
-		filterAnalyzers(analyzers)...,
-	)
-}
-
-func filterAnalyzers(analyzers []*analysis.Analyzer) []*analysis.Analyzer {
-	var filtered []*analysis.Analyzer
-	for _, a := range analyzers {
-		if strings.HasPrefix(a.Name, "Golectra") {
-			filtered = append(filtered, a)
-		}
-	}
-	return filtered
+	multichecker.Main(analyzers...)
 }

@@ -27,7 +27,12 @@ func NewPool[T Resetter](newFn func() T) *Pool[T] {
 
 // Get retrieves an object from the pool.
 func (pl *Pool[T]) Get() T {
-	return pl.p.Get().(T)
+	obj := pl.p.Get()
+	if value, ok := obj.(T); ok {
+		return value
+	}
+	var zero T
+	return zero
 }
 
 // Put returns an object to the pool after resetting it.
