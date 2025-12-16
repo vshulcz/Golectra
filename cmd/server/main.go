@@ -16,10 +16,19 @@ import (
 	"github.com/vshulcz/Golectra/internal/domain"
 	"github.com/vshulcz/Golectra/internal/services/audit"
 	"github.com/vshulcz/Golectra/internal/services/metrics"
+	"github.com/vshulcz/Golectra/pkg/util"
 	"go.uber.org/zap"
 )
 
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
 func main() {
+	printBuildInfo()
+
 	if err := run(os.Args[1:]); err != nil {
 		log.Fatal(err)
 	}
@@ -114,4 +123,8 @@ func buildAuditor(cfg config.ServerConfig, logger *zap.Logger) audit.Publisher {
 		subject.Attach(client)
 	}
 	return subject
+}
+
+func printBuildInfo() {
+	util.PrintBuildInfo(buildVersion, buildDate, buildCommit)
 }

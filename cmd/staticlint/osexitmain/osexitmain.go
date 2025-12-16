@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"go/ast"
 	"go/types"
+	"os"
+	"strings"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -32,10 +34,7 @@ func run(pass *analysis.Pass) (any, error) {
 
 	insp.Preorder([]ast.Node{(*ast.FuncDecl)(nil)}, func(n ast.Node) {
 		fd, ok := n.(*ast.FuncDecl)
-		if !ok {
-			return
-		}
-		if fd.Recv != nil || fd.Name == nil || fd.Name.Name != "main" || fd.Body == nil {
+		if !ok || fd.Recv != nil || fd.Name == nil || fd.Name.Name != "main" || fd.Body == nil {
 			return
 		}
 
@@ -44,8 +43,12 @@ func run(pass *analysis.Pass) (any, error) {
 			case *ast.FuncLit:
 				return false
 			case *ast.CallExpr:
+				pos := pass.Fset.Position(x.Pos())
+				if strings.Contains(pos.Filename, string(os.PathSeparator)+"go-build"+string(os.PathSeparator)) {
+					return false
+				}
 				if isOsExitCall(pass, x) {
-					pass.Reportf(x.Lparen, "It is forbidden to call os.Exit directly in main function; use return code from main instead")
+					pass.Reportf(x.Pos(), "It is forbidden to call os.Exit directly in main function; use return code from main instead")
 				}
 			}
 			return true
@@ -57,14 +60,19 @@ func run(pass *analysis.Pass) (any, error) {
 
 // isOsExitCall checks if the given call expression is a call to os.Exit.
 func isOsExitCall(pass *analysis.Pass, call *ast.CallExpr) bool {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel == nil {
+	if call == nil || call.Fun == nil {
 		return false
 	}
 
-	if pass.TypesInfo == nil {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel == nil || sel.X == nil {
 		return false
 	}
+
+	if pass.TypesInfo == nil || pass.TypesInfo.Uses == nil {
+		return false
+	}
+
 	obj := pass.TypesInfo.Uses[sel.Sel]
 	fn, ok := obj.(*types.Func)
 	if !ok || fn.Pkg() == nil {
