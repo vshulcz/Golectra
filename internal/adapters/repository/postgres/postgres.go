@@ -1,3 +1,4 @@
+// Package postgres implements a Postgres-backed metrics repository.
 package postgres
 
 import (

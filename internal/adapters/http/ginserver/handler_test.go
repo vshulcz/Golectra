@@ -681,3 +681,142 @@ func TestSnapshotJSON_OK(t *testing.T) {
 		t.Fatalf("counters.PollCount=%v", got.Counters["PollCount"])
 	}
 }
+
+func TestDecodeMetricsBatch(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     []domain.Metrics
+		expectErr bool
+	}{
+		{
+			name: "valid batch",
+			input: []domain.Metrics{
+				{ID: "Alloc", MType: string(domain.Gauge), Value: ptrFloat(100)},
+				{ID: "Counter1", MType: string(domain.Counter), Delta: ptrInt64(5)},
+			},
+			expectErr: false,
+		},
+		{
+			name:      "empty batch",
+			input:     []domain.Metrics{},
+			expectErr: false,
+		},
+		{
+			name: "single metric",
+			input: []domain.Metrics{
+				{ID: "TestMetric", MType: string(domain.Gauge), Value: ptrFloat(42.5)},
+			},
+			expectErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := json.Marshal(tt.input)
+			if err != nil {
+				t.Fatalf("failed to encode: %v", err)
+			}
+
+			reader := bytes.NewReader(encoded)
+			items, cleanup, err := decodeMetricsBatch(reader)
+			defer cleanup()
+
+			if (err != nil) != tt.expectErr {
+				t.Errorf("expected error: %v, got: %v", tt.expectErr, err)
+			}
+
+			if !tt.expectErr && len(items) != len(tt.input) {
+				t.Errorf("expected %d items, got %d", len(tt.input), len(items))
+			}
+		})
+	}
+}
+
+func TestDecodeMetricsBatchInvalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "invalid JSON",
+			input: "{ invalid json",
+		},
+		{
+			name:  "wrong type",
+			input: `"not an array"`,
+		},
+		{
+			name:  "empty input",
+			input: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader := bytes.NewReader([]byte(tt.input))
+			_, cleanup, err := decodeMetricsBatch(reader)
+			defer cleanup()
+
+			if err == nil {
+				t.Errorf("expected error for input: %s", tt.name)
+			}
+		})
+	}
+}
+
+func TestCloneMetrics(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []domain.Metrics
+		expected int
+	}{
+		{
+			name: "clone non-empty slice",
+			input: []domain.Metrics{
+				{ID: "Metric1", MType: string(domain.Gauge)},
+				{ID: "Metric2", MType: string(domain.Counter)},
+			},
+			expected: 2,
+		},
+		{
+			name:     "clone empty slice",
+			input:    []domain.Metrics{},
+			expected: 0,
+		},
+		{
+			name:     "clone nil slice",
+			input:    nil,
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cloned := cloneMetrics(tt.input)
+
+			if tt.expected == 0 && cloned != nil {
+				t.Errorf("expected nil for empty input, got non-nil")
+			}
+
+			if tt.expected > 0 && len(cloned) != tt.expected {
+				t.Errorf("expected %d items, got %d", tt.expected, len(cloned))
+			}
+
+			if len(tt.input) > 0 && len(cloned) > 0 {
+				originalID := tt.input[0].ID
+				cloned[0].ID = "modified"
+				if tt.input[0].ID != originalID {
+					t.Error("modification of clone should not affect original")
+				}
+			}
+		})
+	}
+}
+
+func ptrFloat(f float64) *float64 {
+	return &f
+}
+
+func ptrInt64(i int64) *int64 {
+	return &i
+}

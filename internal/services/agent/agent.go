@@ -1,3 +1,4 @@
+// Package agent implements the metrics collection agent.
 package agent
 
 import (

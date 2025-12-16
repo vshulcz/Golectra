@@ -1,19 +1,33 @@
 name: lint
 on:
-  pull_request:
-  push:
-    branches: [ main ]
+    pull_request:
+    push:
+        branches: [main]
 
 jobs:
-  golangci:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: latest
-          args: --timeout=5m
+    golangci:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-go@v6
+              with:
+                  go-version-file: go.mod
+            - name: golangci-lint
+              uses: golangci/golangci-lint-action@v8
+              with:
+                  version: latest
+                  args: --timeout=5m
+
+    staticlint:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v5
+            - name: Set up Go
+              uses: actions/setup-go@v6
+              with:
+                  go-version-file: go.mod
+            - name: Install dependencies
+              run: go mod tidy
+            - name: Run Staticlint
+              run: go run ./cmd/staticlint/main.go ./...

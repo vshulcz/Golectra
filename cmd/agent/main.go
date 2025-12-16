@@ -12,9 +12,18 @@ import (
 	"github.com/vshulcz/Golectra/internal/adapters/publisher/httpjson"
 	"github.com/vshulcz/Golectra/internal/config"
 	agentsvc "github.com/vshulcz/Golectra/internal/services/agent"
+	"github.com/vshulcz/Golectra/pkg/util"
+)
+
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
 )
 
 func main() {
+	printBuildInfo()
+
 	cfg, err := config.LoadAgentConfig(os.Args[1:], nil)
 	if err != nil {
 		log.Fatalf("failed to parse flags: %v", err)
@@ -35,4 +44,8 @@ func main() {
 	if err := runner.Run(ctx); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func printBuildInfo() {
+	util.PrintBuildInfo(buildVersion, buildDate, buildCommit)
 }

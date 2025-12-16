@@ -1,4 +1,4 @@
-package remoteaudit
+package remote
 
 import (
 	"bytes"
