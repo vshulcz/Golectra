@@ -1,84 +1,81 @@
 version: "2"
 
 run:
-  timeout: 5m
-  tests: true
-  concurrency: 0
+    timeout: 5m
+    tests: true
+    concurrency: 0
 
 linters:
-  default: none
-  enable:
-    - govet
-    - staticcheck
-    - errcheck
-    - ineffassign
-    - unused
-    - revive
-    - gocyclo
-    - dupl
-    - goconst
-    - gocritic
-    - misspell
-    - prealloc
-    - copyloopvar  
-    - nakedret
-    - unparam
-    - gosec
-    - noctx
-    - sqlclosecheck
-    - nolintlint
-  settings:
-    gocyclo:
-      min-complexity: 15
-    dupl:
-      threshold: 150
-    goconst:
-      min-len: 2
-      min-occurrences: 3
-    misspell:
-      locale: US
-    gocritic:
-      enabled-checks:
-        - rangeValCopy
-        - appendCombine
-        - captLocal
-        - ifElseChain
-        - sloppyLen
-    nolintlint:
-      require-explanation: true
-      require-specific: true
-    revive:
-      rules:
-        - name: exported
-          disabled: false
-  exclusions:
-    paths:
-      - vendor
-      - third_party
-      - gen
-      - generated
-      - ".*_generated\\.go"
-      - ".*\\.pb\\.go"
-      - ".*_mock\\.go"
-    rules:
-      - path: '(.+)_test\.go'
-        linters:
-          - unparam
-          - gocyclo
-          - dupl
-          - gosec
-      - linters: [errcheck]
-        text: "Error return value of .*\\.(Close|Stop)\\(\\) is not checked"
-      - text: "context.WithCancel function results are not used"
-        source: "context\\.WithCancel\\("
+    default: none
+    enable:
+        - govet
+        - staticcheck
+        - errcheck
+        - ineffassign
+        - unused
+        - revive
+        - gocyclo
+        - dupl
+        - goconst
+        - gocritic
+        - misspell
+        - prealloc
+        - copyloopvar
+        - nakedret
+        - unparam
+        - gosec
+        - noctx
+        - sqlclosecheck
+        - nolintlint
+    settings:
+        gocyclo:
+            min-complexity: 15
+        dupl:
+            threshold: 150
+        goconst:
+            min-len: 2
+            min-occurrences: 3
+        misspell:
+            locale: US
+        gocritic:
+            enabled-checks:
+                - rangeValCopy
+                - appendCombine
+        nolintlint:
+            require-explanation: true
+            require-specific: true
+        revive:
+            rules:
+                - name: exported
+                  disabled: false
+    exclusions:
+        paths:
+            - vendor
+            - third_party
+            - gen
+            - generated
+            - ".*_generated\\.go"
+            - ".*\\.pb\\.go"
+            - ".*_mock\\.go"
+        rules:
+            - path: '(.+)_test\.go'
+              linters:
+                  - unparam
+                  - gocyclo
+                  - dupl
+                  - gosec
+            - linters: [errcheck]
+              text: "Error return value of .*\\.(Close|Stop)\\(\\) is not checked"
+            - text: "context.WithCancel function results are not used"
+              source: "context\\.WithCancel\\("
 
 issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
+    max-issues-per-linter: 0
+    max-same-issues: 0
 
 formatters:
-  enable:
-    - gofumpt
-  settings:
-    gofumpt:
-      extra-rules: true
+    enable:
+        - gofumpt
+    settings:
+        gofumpt:
+            extra-rules: true
