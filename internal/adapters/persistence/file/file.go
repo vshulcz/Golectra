@@ -1,3 +1,4 @@
+// Package file implements a filesystem-based metrics snapshot persister.
 package file
 
 import (

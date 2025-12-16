@@ -185,9 +185,15 @@ func (p *compressedPayload) Release() {
 }
 
 func gzipBytes(src []byte) (*compressedPayload, error) {
-	buf := bufferPool.Get().(*bytes.Buffer)
+	buf, ok := bufferPool.Get().(*bytes.Buffer)
+	if !ok {
+		return nil, fmt.Errorf("failed to assert type: expected *bytes.Buffer")
+	}
 	buf.Reset()
-	zw := gzipWriterPool.Get().(*gzip.Writer)
+	zw, ok := gzipWriterPool.Get().(*gzip.Writer)
+	if !ok {
+		return nil, fmt.Errorf("failed to assert type: expected *gzip.Writer")
+	}
 	zw.Reset(buf)
 	if _, err := zw.Write(src); err != nil {
 		_ = zw.Close()

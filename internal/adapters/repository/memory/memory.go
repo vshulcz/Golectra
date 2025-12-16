@@ -1,3 +1,4 @@
+// Package memory implements an in-memory metrics repository.
 package memory
 
 import (

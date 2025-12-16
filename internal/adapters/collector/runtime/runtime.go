@@ -1,3 +1,4 @@
+// Package runtime implements a metrics collector that samples Go runtime stats and host CPU/RAM usage.
 package runtime
 
 import (
