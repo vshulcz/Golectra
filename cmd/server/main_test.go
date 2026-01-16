@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,12 +14,12 @@ import (
 )
 
 type fakePersister struct {
-	calls int
+	calls atomic.Int64
 	err   error
 }
 
 func (f *fakePersister) Save(_ context.Context, _ domain.Snapshot) error {
-	f.calls++
+	f.calls.Add(1)
 	return f.err
 }
 
@@ -27,7 +28,7 @@ func (f *fakePersister) Restore(context.Context, ports.MetricsRepo) error {
 }
 
 type fakeRepo struct {
-	snapshotCalls int
+	snapshotCalls atomic.Int64
 	snap          domain.Snapshot
 	err           error
 }
@@ -38,7 +39,7 @@ func (r *fakeRepo) SetGauge(context.Context, string, float64) error    { return 
 func (r *fakeRepo) AddCounter(context.Context, string, int64) error    { return nil }
 func (r *fakeRepo) UpdateMany(context.Context, []domain.Metrics) error { return nil }
 func (r *fakeRepo) Snapshot(context.Context) (domain.Snapshot, error) {
-	r.snapshotCalls++
+	r.snapshotCalls.Add(1)
 	return r.snap, r.err
 }
 func (r *fakeRepo) Ping(context.Context) error { return nil }
@@ -54,8 +55,8 @@ func TestBuildSnapshotHook(t *testing.T) {
 	p := &fakePersister{}
 	hook := buildSnapshotHook(p, logger)
 	hook(context.Background(), domain.Snapshot{})
-	if p.calls != 1 {
-		t.Fatalf("calls=%d want 1", p.calls)
+	if got := p.calls.Load(); got != 1 {
+		t.Fatalf("calls=%d want 1", got)
 	}
 }
 
@@ -110,11 +111,11 @@ func TestSaveSnapshot_CallsSave(t *testing.T) {
 	if err := saveSnapshot(context.Background(), repo, p, logger); err != nil {
 		t.Fatalf("saveSnapshot error: %v", err)
 	}
-	if repo.snapshotCalls != 1 {
-		t.Fatalf("snapshotCalls=%d want=1", repo.snapshotCalls)
+	if got := repo.snapshotCalls.Load(); got != 1 {
+		t.Fatalf("snapshotCalls=%d want=1", got)
 	}
-	if p.calls != 1 {
-		t.Fatalf("persister calls=%d want=1", p.calls)
+	if got := p.calls.Load(); got != 1 {
+		t.Fatalf("persister calls=%d want=1", got)
 	}
 }
 
@@ -128,7 +129,7 @@ func TestStartPeriodicSave_TriggersSave(t *testing.T) {
 	defer stop()
 
 	deadline := time.After(200 * time.Millisecond)
-	for p.calls == 0 {
+	for p.calls.Load() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("expected periodic save call")
