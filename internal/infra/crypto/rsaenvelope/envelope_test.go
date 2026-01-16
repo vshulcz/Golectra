@@ -78,3 +78,15 @@ func TestLoadKeys(t *testing.T) {
 		t.Fatal("private key mismatch")
 	}
 }
+
+func TestReadKeyFile_Errors(t *testing.T) {
+	if _, err := readKeyFile(""); err == nil {
+		t.Fatal("expected error for empty path")
+	}
+	if _, err := readKeyFile("../"); err == nil {
+		t.Fatal("expected error for invalid filename")
+	}
+	if _, err := readKeyFile(filepath.Join(t.TempDir(), "missing.pem")); err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}

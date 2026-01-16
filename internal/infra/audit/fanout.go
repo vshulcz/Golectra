@@ -1,3 +1,4 @@
+// Package audit provides infrastructure helpers for audit fan-out.
 package audit
 
 import (

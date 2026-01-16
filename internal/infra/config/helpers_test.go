@@ -79,6 +79,13 @@ func TestHelpers_FromEnvOrFlagBool(t *testing.T) {
 			expect: true,
 		},
 		{
+			name:   "env explicit false wins",
+			env:    "false",
+			flag:   true,
+			def:    true,
+			expect: false,
+		},
+		{
 			name:   "no env -> flag true used",
 			env:    "",
 			flag:   true,
@@ -219,6 +226,15 @@ func TestHelpers_FromEnvOrFlagDuration(t *testing.T) {
 			sentinel:     0,
 			defSeconds:   300,
 			expectDur:    300 * time.Second,
+			expectCustom: true,
+		},
+		{
+			name:         "env zero -> zero duration",
+			env:          "0",
+			flagSeconds:  10,
+			sentinel:     0,
+			defSeconds:   300,
+			expectDur:    0 * time.Second,
 			expectCustom: true,
 		},
 		{

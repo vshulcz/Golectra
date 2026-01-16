@@ -1,3 +1,4 @@
+// Package rsaenvelope provides RSA-OAEP + AES-GCM envelope encryption helpers.
 package rsaenvelope
 
 import (
