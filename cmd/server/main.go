@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/vshulcz/Golectra/internal/application/metrics"
@@ -70,10 +72,32 @@ func run(args []string) error {
 	)
 
 	logConfig(cfg)
-	startPeriodicSave(cfg, repo, persister, logger)
-
 	srv := newHTTPServer(cfg, r)
-	return serve(srv)
+	stopPeriodic := startPeriodicSave(cfg, repo, persister, logger)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serve(srv)
+	}()
+
+	select {
+	case <-ctx.Done():
+		stopPeriodic()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer saveCancel()
+		return saveSnapshot(saveCtx, repo, persister, logger)
+	case err := <-errCh:
+		stopPeriodic()
+		return err
+	}
 }
 
 func buildAuditor(cfg config.ServerConfig, logger *zap.Logger) ports.AuditPublisher {
@@ -137,22 +161,32 @@ func logConfig(cfg config.ServerConfig) {
 		cfg.Address, cfg.File, cfg.Interval, cfg.Restore, cfg.DSN, cfg.AuditFile, cfg.AuditURL)
 }
 
-func startPeriodicSave(cfg config.ServerConfig, repo ports.MetricsRepo, persister ports.Persister, logger *zap.Logger) {
-	if cfg.DSN != "" || cfg.Interval <= 0 {
-		return
+func startPeriodicSave(cfg config.ServerConfig, repo ports.MetricsRepo, persister ports.Persister, logger *zap.Logger) func() {
+	if cfg.DSN != "" || cfg.Interval <= 0 || persister == nil {
+		return func() {}
 	}
 	ticker := time.NewTicker(cfg.Interval)
+	done := make(chan struct{})
 	go func() {
-		for range ticker.C {
-			snap, err := repo.Snapshot(context.Background())
-			if err != nil || persister == nil {
-				continue
-			}
-			if err := persister.Save(context.Background(), snap); err != nil {
-				logger.Warn("periodic save failed", zap.Error(err))
+		for {
+			select {
+			case <-ticker.C:
+				snap, err := repo.Snapshot(context.Background())
+				if err != nil {
+					continue
+				}
+				if err := persister.Save(context.Background(), snap); err != nil {
+					logger.Warn("periodic save failed", zap.Error(err))
+				}
+			case <-done:
+				ticker.Stop()
+				return
 			}
 		}
 	}()
+	return func() {
+		close(done)
+	}
 }
 
 func newHTTPServer(cfg config.ServerConfig, handler http.Handler) *http.Server {
@@ -168,6 +202,22 @@ func newHTTPServer(cfg config.ServerConfig, handler http.Handler) *http.Server {
 
 func serve(srv *http.Server) error {
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+func saveSnapshot(ctx context.Context, repo ports.MetricsRepo, persister ports.Persister, logger *zap.Logger) error {
+	if repo == nil || persister == nil {
+		return nil
+	}
+	snap, err := repo.Snapshot(ctx)
+	if err != nil {
+		logger.Warn("snapshot failed", zap.Error(err))
+		return err
+	}
+	if err := persister.Save(ctx, snap); err != nil {
+		logger.Warn("snapshot save failed", zap.Error(err))
 		return err
 	}
 	return nil

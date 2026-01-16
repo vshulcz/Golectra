@@ -26,6 +26,23 @@ func (f *fakePersister) Restore(context.Context, ports.MetricsRepo) error {
 	return nil
 }
 
+type fakeRepo struct {
+	snapshotCalls int
+	snap          domain.Snapshot
+	err           error
+}
+
+func (r *fakeRepo) GetGauge(context.Context, string) (float64, error)  { return 0, nil }
+func (r *fakeRepo) GetCounter(context.Context, string) (int64, error)  { return 0, nil }
+func (r *fakeRepo) SetGauge(context.Context, string, float64) error    { return nil }
+func (r *fakeRepo) AddCounter(context.Context, string, int64) error    { return nil }
+func (r *fakeRepo) UpdateMany(context.Context, []domain.Metrics) error { return nil }
+func (r *fakeRepo) Snapshot(context.Context) (domain.Snapshot, error) {
+	r.snapshotCalls++
+	return r.snap, r.err
+}
+func (r *fakeRepo) Ping(context.Context) error { return nil }
+
 func TestBuildVariablesExist(t *testing.T) {
 	_ = buildVersion
 	_ = buildDate
@@ -74,5 +91,49 @@ func TestServe_StartAndClose(t *testing.T) {
 
 	if err := <-errCh; err != nil {
 		t.Fatalf("serve error: %v", err)
+	}
+}
+
+func TestSaveSnapshot_NoPersister(t *testing.T) {
+	logger := zap.NewNop()
+	repo := &fakeRepo{}
+	if err := saveSnapshot(context.Background(), repo, nil, logger); err != nil {
+		t.Fatalf("saveSnapshot error: %v", err)
+	}
+}
+
+func TestSaveSnapshot_CallsSave(t *testing.T) {
+	logger := zap.NewNop()
+	repo := &fakeRepo{snap: domain.Snapshot{}}
+	p := &fakePersister{}
+
+	if err := saveSnapshot(context.Background(), repo, p, logger); err != nil {
+		t.Fatalf("saveSnapshot error: %v", err)
+	}
+	if repo.snapshotCalls != 1 {
+		t.Fatalf("snapshotCalls=%d want=1", repo.snapshotCalls)
+	}
+	if p.calls != 1 {
+		t.Fatalf("persister calls=%d want=1", p.calls)
+	}
+}
+
+func TestStartPeriodicSave_TriggersSave(t *testing.T) {
+	logger := zap.NewNop()
+	repo := &fakeRepo{snap: domain.Snapshot{}}
+	p := &fakePersister{}
+	cfg := config.ServerConfig{Interval: 10 * time.Millisecond}
+
+	stop := startPeriodicSave(cfg, repo, p, logger)
+	defer stop()
+
+	deadline := time.After(200 * time.Millisecond)
+	for p.calls == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("expected periodic save call")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
 	}
 }

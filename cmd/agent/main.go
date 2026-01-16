@@ -47,7 +47,7 @@ func main() {
 	collector := runtime.New()
 	runner := agentsvc.New(mapAgentConfig(cfg), collector, pub)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	log.Printf("agent started: server=%s poll=%s report=%s limit=%d",
