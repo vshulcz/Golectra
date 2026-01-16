@@ -6,7 +6,7 @@ This folder documents how to re-run every performance benchmark and interpret th
 
 1. Build the standalone benchmark once (re-usable between runs):
    ```bash
-   go test -c ./internal/services/metrics -o metrics_bench.test
+  go test -c ./internal/application/metrics -o metrics_bench.test
    ```
 2. Capture a baseline profile (before changes):
    ```bash
@@ -28,8 +28,8 @@ Latest diff (after trimming IDs once + deduping names in-place):
 ```
 Showing nodes accounting for 389.16MB, 13.35% of 2915.98MB total
     flat  flat%   sum%        cum   cum%
- -741.44MB 25.43% 13.35%  -741.44MB 25.43%  github.com/vshulcz/Golectra/internal/services/metrics.metricNames
-  389.16MB 13.35% 13.35%   389.16MB 13.35%  github.com/vshulcz/Golectra/internal/services/metrics.(*Service).UpsertBatch
+ -741.44MB 25.43% 13.35%  -741.44MB 25.43%  github.com/vshulcz/Golectra/internal/application/metrics.metricNames
+  389.16MB 13.35% 13.35%   389.16MB 13.35%  github.com/vshulcz/Golectra/internal/application/metrics.(*Service).UpsertBatch
 ```
 
 Resulting benchmark: `BenchmarkServiceUpsertBatch-8 257097 4506 ns/op 13184 B/op 2 allocs/op`.
@@ -37,7 +37,7 @@ Resulting benchmark: `BenchmarkServiceUpsertBatch-8 257097 4506 ns/op 13184 B/op
 ### HTTP API – `/updates` JSON handler
 
 ```
-go test ./internal/adapters/http/ginserver \
+go test ./internal/infra/http/ginserver \
   -run ^$ \
   -bench BenchmarkHandlerUpdateMetricsBatchJSON \
   -benchmem \
@@ -55,7 +55,7 @@ Top allocators: encoding/json.Decoder.refill (53%), Service.UpsertBatch (25%).
 ### HTTP publisher – gzip JSON client
 
 ```
-go test ./internal/adapters/publisher/httpjson \
+go test ./internal/infra/publisher/httpjson \
   -run ^$ \
   -bench BenchmarkClientSendBatch \
   -benchmem \
@@ -73,7 +73,7 @@ compress/flate.NewWriter now accounts for ~37% of alloc_space (was ~74%).
 ### Agent service – `reportOnce`
 
 ```
-go test ./internal/services/agent \
+go test ./internal/application/agent \
   -run ^$ \
   -bench BenchmarkAgentReportOnce \
   -benchmem \

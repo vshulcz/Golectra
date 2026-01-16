@@ -8,10 +8,12 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/vshulcz/Golectra/internal/adapters/collector/runtime"
-	"github.com/vshulcz/Golectra/internal/adapters/publisher/httpjson"
-	"github.com/vshulcz/Golectra/internal/config"
-	agentsvc "github.com/vshulcz/Golectra/internal/services/agent"
+	agentsvc "github.com/vshulcz/Golectra/internal/application/agent"
+	"github.com/vshulcz/Golectra/internal/infra/collector/runtime"
+	"github.com/vshulcz/Golectra/internal/infra/config"
+	"github.com/vshulcz/Golectra/internal/infra/crypto/rsaenvelope"
+	"github.com/vshulcz/Golectra/internal/infra/publisher/httpjson"
+	"github.com/vshulcz/Golectra/internal/ports"
 	"github.com/vshulcz/Golectra/pkg/util"
 )
 
@@ -29,12 +31,26 @@ func main() {
 		log.Fatalf("failed to parse flags: %v", err)
 	}
 
-	pub, err := httpjson.New(cfg.Address, &http.Client{}, cfg.Key)
+	var encrypter ports.PayloadEncrypter
+	if cfg.CryptoKey != "" {
+		key, err := rsaenvelope.LoadPublicKey(cfg.CryptoKey)
+		if err != nil {
+			log.Fatalf("failed to load crypto key: %v", err)
+		}
+		encrypter = rsaenvelope.NewEncrypter(key)
+	}
+
+	pub, err := httpjson.New(cfg.Address, &http.Client{}, cfg.Key, encrypter)
 	if err != nil {
 		log.Fatalf("failed to init publisher: %v", err)
 	}
 	collector := runtime.New()
-	runner := agentsvc.New(cfg, collector, pub)
+	appCfg := agentsvc.Config{
+		PollInterval:   cfg.PollInterval,
+		ReportInterval: cfg.ReportInterval,
+		RateLimit:      cfg.RateLimit,
+	}
+	runner := agentsvc.New(appCfg, collector, pub)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
