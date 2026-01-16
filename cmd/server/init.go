@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	_ "github.com/lib/pq"
 	"go.uber.org/zap"
@@ -16,7 +17,8 @@ import (
 )
 
 func buildRepoAndPersister(cfg config.ServerConfig, logger *zap.Logger) (ports.MetricsRepo, ports.Persister) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	if cfg.DSN != "" {
 		db, err := sql.Open("postgres", cfg.DSN)
 		if err == nil {

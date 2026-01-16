@@ -17,6 +17,7 @@ fmt: tools ## Format Go sources with gofmt + goimports
 
 lint: ## Run golangci-lint for the whole repo
 	golangci-lint run ./...
+	go run ./cmd/staticlint/main.go ./...
 
 lint-fast: ## Run golangci-lint only for changes vs origin/main
 	golangci-lint run --new-from-rev=origin/main

@@ -100,7 +100,7 @@ func TestLoadAgentConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, k := range []string{"ADDRESS", "REPORT_INTERVAL", "POLL_INTERVAL", "CRYPTO_KEY"} {
+			for _, k := range []string{"ADDRESS", "REPORT_INTERVAL", "POLL_INTERVAL", "CRYPTO_KEY", "CONFIG", "KEY", "RATE_LIMIT"} {
 				t.Setenv(k, "")
 			}
 			for k, v := range tt.env {
@@ -131,6 +131,68 @@ func TestLoadAgentConfig(t *testing.T) {
 				t.Errorf("PollInterval: want %v, got %v", tt.want.PollInterval, got.PollInterval)
 			}
 		})
+	}
+}
+
+func TestLoadAgentConfig_FileConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/agent.json"
+	cfg := `{"address":"http://cfg:8080","report_interval":"3s","poll_interval":"4s","crypto_key":"pub.pem","key":"hmac","rate_limit":7}`
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("CONFIG", path)
+	t.Setenv("ADDRESS", "")
+	t.Setenv("REPORT_INTERVAL", "")
+	t.Setenv("POLL_INTERVAL", "")
+	t.Setenv("CRYPTO_KEY", "")
+	t.Setenv("KEY", "")
+	t.Setenv("RATE_LIMIT", "")
+
+	got, err := LoadAgentConfig([]string{}, os.Stderr)
+	if err != nil {
+		t.Fatalf("LoadAgentConfig error: %v", err)
+	}
+
+	if got.Address != "http://cfg:8080" {
+		t.Fatalf("Address=%q want %q", got.Address, "http://cfg:8080")
+	}
+	if got.ReportInterval != 3*time.Second {
+		t.Fatalf("ReportInterval=%v want %v", got.ReportInterval, 3*time.Second)
+	}
+	if got.PollInterval != 4*time.Second {
+		t.Fatalf("PollInterval=%v want %v", got.PollInterval, 4*time.Second)
+	}
+	if got.CryptoKey != "pub.pem" || got.Key != "hmac" || got.RateLimit != 7 {
+		t.Fatalf("config mismatch: %+v", got)
+	}
+}
+
+func TestLoadAgentConfig_FileConfig_Priority(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/agent.json"
+	cfg := `{"address":"http://cfg:8080","report_interval":"3s","poll_interval":"4s"}`
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("CONFIG", path)
+	t.Setenv("ADDRESS", "http://env:9090")
+	t.Setenv("REPORT_INTERVAL", "9s")
+
+	got, err := LoadAgentConfig([]string{"-p", "7"}, os.Stderr)
+	if err != nil {
+		t.Fatalf("LoadAgentConfig error: %v", err)
+	}
+	if got.Address != "http://env:9090" {
+		t.Fatalf("Address=%q want %q", got.Address, "http://env:9090")
+	}
+	if got.ReportInterval != 9*time.Second {
+		t.Fatalf("ReportInterval=%v want %v", got.ReportInterval, 9*time.Second)
+	}
+	if got.PollInterval != 7*time.Second {
+		t.Fatalf("PollInterval=%v want %v", got.PollInterval, 7*time.Second)
 	}
 }
 

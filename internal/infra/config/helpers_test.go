@@ -190,7 +190,7 @@ func TestHelpers_FromEnvOrFlagInt(t *testing.T) {
 	}
 }
 
-func TestHelpers_FromEnvOrFlagDuration(t *testing.T) {
+func TestHelpers_FromEnvOrFlagDurationWithDefault(t *testing.T) {
 	const key = "CFG_DUR"
 	tests := []struct {
 		name         string
@@ -287,7 +287,7 @@ func TestHelpers_FromEnvOrFlagDuration(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(key, tc.env)
-			got, custom := FromEnvOrFlagDuration(key, tc.flagSeconds, tc.sentinel, tc.defSeconds)
+			got, custom := FromEnvOrFlagDurationWithDefault(key, tc.flagSeconds, tc.sentinel, time.Duration(tc.defSeconds)*time.Second)
 			if got != tc.expectDur || custom != tc.expectCustom {
 				t.Fatalf("got (%v, %v), want (%v, %v)", got, custom, tc.expectDur, tc.expectCustom)
 			}
