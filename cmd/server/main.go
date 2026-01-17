@@ -50,54 +50,17 @@ func run(args []string) error {
 	}
 	defer cleanup()
 
-	repo, persister := buildRepoAndPersister(cfg, logger)
-	onChanged := buildSnapshotHook(persister, logger)
-
-	auditor := buildAuditor(cfg, logger)
-	svc := metrics.New(repo, onChanged, auditor)
-	defer svc.Close()
-	h := ginserver.NewHandler(svc)
-
-	decrypter, err := loadDecrypter(cfg)
+	env, err := buildServerEnv(cfg, logger)
 	if err != nil {
 		return err
 	}
-
-	r := ginserver.NewRouter(h, logger,
-		middlewares.ZapLogger(logger),
-		middlewares.DecryptPayload(decrypter),
-		middlewares.GzipRequest(),
-		middlewares.GzipResponse(),
-		middlewares.HashSHA256(cfg.Key),
-	)
+	defer env.svc.Close()
 
 	logConfig(cfg)
-	srv := newHTTPServer(cfg, r)
-	stopPeriodic := startPeriodicSave(cfg, repo, persister, logger)
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	ctx, stop := signalContext()
 	defer stop()
 
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- serve(srv)
-	}()
-
-	select {
-	case <-ctx.Done():
-		stopPeriodic()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			return err
-		}
-		saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer saveCancel()
-		return saveSnapshot(saveCtx, repo, persister, logger)
-	case err := <-errCh:
-		stopPeriodic()
-		return err
-	}
+	return serveWithSignals(ctx, env, logger)
 }
 
 func buildAuditor(cfg config.ServerConfig, logger *zap.Logger) ports.AuditPublisher {
@@ -156,9 +119,85 @@ func loadDecrypter(cfg config.ServerConfig) (ports.PayloadDecrypter, error) {
 	return rsaenvelope.NewDecrypter(key), nil
 }
 
+type serverEnv struct {
+	repo         ports.MetricsRepo
+	persister    ports.Persister
+	svc          *metrics.Service
+	srv          *http.Server
+	stopPeriodic func()
+}
+
+func buildServerEnv(cfg config.ServerConfig, logger *zap.Logger) (*serverEnv, error) {
+	repo, persister := buildRepoAndPersister(cfg, logger)
+	onChanged := buildSnapshotHook(persister, logger)
+
+	auditor := buildAuditor(cfg, logger)
+	svc := metrics.New(repo, onChanged, auditor)
+
+	router, err := buildRouter(cfg, logger, svc)
+	if err != nil {
+		svc.Close()
+		return nil, err
+	}
+
+	srv := newHTTPServer(cfg, router)
+	stopPeriodic := startPeriodicSave(cfg, repo, persister, logger)
+
+	return &serverEnv{
+		repo:         repo,
+		persister:    persister,
+		svc:          svc,
+		srv:          srv,
+		stopPeriodic: stopPeriodic,
+	}, nil
+}
+
+func buildRouter(cfg config.ServerConfig, logger *zap.Logger, svc *metrics.Service) (http.Handler, error) {
+	h := ginserver.NewHandler(svc)
+	decrypter, err := loadDecrypter(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return ginserver.NewRouter(h, logger,
+		middlewares.ZapLogger(logger),
+		middlewares.DecryptPayload(decrypter),
+		middlewares.GzipRequest(),
+		middlewares.GzipResponse(),
+		middlewares.HashSHA256(cfg.Key),
+	), nil
+}
+
 func logConfig(cfg config.ServerConfig) {
 	log.Printf("cfg: addr=%s file=%s interval=%v restore=%v dsn=%q audit_file=%q audit_url=%q",
 		cfg.Address, cfg.File, cfg.Interval, cfg.Restore, cfg.DSN, cfg.AuditFile, cfg.AuditURL)
+}
+
+func signalContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+}
+
+func serveWithSignals(ctx context.Context, env *serverEnv, logger *zap.Logger) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serve(env.srv)
+	}()
+
+	select {
+	case <-ctx.Done():
+		env.stopPeriodic()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := env.srv.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer saveCancel()
+		return saveSnapshot(saveCtx, env.repo, env.persister, logger)
+	case err := <-errCh:
+		env.stopPeriodic()
+		return err
+	}
 }
 
 func startPeriodicSave(cfg config.ServerConfig, repo ports.MetricsRepo, persister ports.Persister, logger *zap.Logger) func() {

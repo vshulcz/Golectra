@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vshulcz/Golectra/internal/application/metrics"
 	"github.com/vshulcz/Golectra/internal/domain"
 	"github.com/vshulcz/Golectra/internal/infra/config"
 	"github.com/vshulcz/Golectra/internal/ports"
@@ -113,6 +114,56 @@ func TestSaveSnapshot_CallsSave(t *testing.T) {
 	}
 	if got := repo.snapshotCalls.Load(); got != 1 {
 		t.Fatalf("snapshotCalls=%d want=1", got)
+	}
+	if got := p.calls.Load(); got != 1 {
+		t.Fatalf("persister calls=%d want=1", got)
+	}
+}
+
+func TestBuildRouter(t *testing.T) {
+	logger := zap.NewNop()
+	cfg := config.ServerConfig{Address: "127.0.0.1:0"}
+	svc := metrics.New(&fakeRepo{}, nil, nil)
+	defer svc.Close()
+
+	router, err := buildRouter(cfg, logger, svc)
+	if err != nil {
+		t.Fatalf("buildRouter error: %v", err)
+	}
+	if router == nil {
+		t.Fatal("expected router")
+	}
+}
+
+func TestServeWithSignals_ShutsDownAndSaves(t *testing.T) {
+	logger := zap.NewNop()
+	repo := &fakeRepo{snap: domain.Snapshot{}}
+	p := &fakePersister{}
+	srv := newHTTPServer(config.ServerConfig{Address: "127.0.0.1:0"}, http.NewServeMux())
+
+	stopped := atomic.Bool{}
+	env := &serverEnv{
+		repo:      repo,
+		persister: p,
+		svc:       metrics.New(repo, nil, nil),
+		srv:       srv,
+		stopPeriodic: func() {
+			stopped.Store(true)
+		},
+	}
+	defer env.svc.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	if err := serveWithSignals(ctx, env, logger); err != nil {
+		t.Fatalf("serveWithSignals error: %v", err)
+	}
+	if !stopped.Load() {
+		t.Fatal("expected stopPeriodic to be called")
 	}
 	if got := p.calls.Load(); got != 1 {
 		t.Fatalf("persister calls=%d want=1", got)

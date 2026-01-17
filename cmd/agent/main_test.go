@@ -14,19 +14,17 @@ func TestBuildVariablesExist(t *testing.T) {
 	_ = buildCommit
 }
 
-func TestMapAgentConfig(t *testing.T) {
+func TestAgentConfigAlias(t *testing.T) {
 	cfg := config.AgentConfig{
+		Address:        "http://localhost:8080",
+		Key:            "k",
+		CryptoKey:      "pub.pem",
 		PollInterval:   2 * time.Second,
 		ReportInterval: 5 * time.Second,
 		RateLimit:      3,
 	}
-	got := mapAgentConfig(cfg)
-	want := agent.Config{
-		PollInterval:   2 * time.Second,
-		ReportInterval: 5 * time.Second,
-		RateLimit:      3,
-	}
-	if got != want {
-		t.Fatalf("mapAgentConfig=%+v want %+v", got, want)
+	var got agent.Config = cfg
+	if got != cfg {
+		t.Fatalf("agent.Config=%+v want %+v", got, cfg)
 	}
 }
