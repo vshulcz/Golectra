@@ -3,20 +3,22 @@ package main
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	_ "github.com/lib/pq"
 	"go.uber.org/zap"
 
-	"github.com/vshulcz/Golectra/internal/adapters/persistence/file"
-	memrepo "github.com/vshulcz/Golectra/internal/adapters/repository/memory"
-	pgrepo "github.com/vshulcz/Golectra/internal/adapters/repository/postgres"
-	"github.com/vshulcz/Golectra/internal/config"
-	"github.com/vshulcz/Golectra/internal/misc"
+	"github.com/vshulcz/Golectra/internal/infra/config"
+	"github.com/vshulcz/Golectra/internal/infra/persistence/file"
+	memrepo "github.com/vshulcz/Golectra/internal/infra/repository/memory"
+	pgrepo "github.com/vshulcz/Golectra/internal/infra/repository/postgres"
+	"github.com/vshulcz/Golectra/internal/infra/retry"
 	"github.com/vshulcz/Golectra/internal/ports"
 )
 
 func buildRepoAndPersister(cfg config.ServerConfig, logger *zap.Logger) (ports.MetricsRepo, ports.Persister) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	if cfg.DSN != "" {
 		db, err := sql.Open("postgres", cfg.DSN)
 		if err == nil {
@@ -26,7 +28,7 @@ func buildRepoAndPersister(cfg config.ServerConfig, logger *zap.Logger) (ports.M
 				}
 				return pgrepo.Migrate(db)
 			}
-			if err = misc.Retry(ctx, misc.DefaultBackoff, pgrepo.IsRetryable, op); err == nil {
+			if err = retry.Retry(ctx, retry.DefaultBackoff, pgrepo.IsRetryable, op); err == nil {
 				logger.Info("db connected & migrated")
 				return pgrepo.New(db), nil
 			}
