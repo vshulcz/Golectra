@@ -59,6 +59,23 @@ func FromEnvOrFlagDuration(envKey string, flagSeconds, flagSentinel, defSeconds 
 	return time.Duration(defSeconds) * time.Second, false
 }
 
+// FromEnvOrFlagDurationWithDefault reads a duration with a default duration fallback.
+func FromEnvOrFlagDurationWithDefault(envKey string, flagSeconds, flagSentinel int, def time.Duration) (time.Duration, bool) {
+	if ev := strings.TrimSpace(os.Getenv(envKey)); ev != "" {
+		if n, err := strconv.ParseInt(ev, 10, 64); err == nil {
+			return time.Duration(n) * time.Second, true
+		}
+		if d, err := time.ParseDuration(ev); err == nil {
+			return d, true
+		}
+		return envDuration(envKey, def), true
+	}
+	if flagSeconds != flagSentinel {
+		return time.Duration(flagSeconds) * time.Second, true
+	}
+	return def, false
+}
+
 func envDuration(key string, def time.Duration) time.Duration {
 	v := os.Getenv(key)
 	if v == "" {

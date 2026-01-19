@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -120,7 +121,7 @@ func TestLoadServerConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, k := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY"} {
+			for _, k := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "CONFIG", "KEY", "DATABASE_DSN", "STORE_FILE"} {
 				t.Setenv(k, "")
 			}
 			for k, v := range tt.env {
@@ -163,6 +164,62 @@ func TestLoadServerConfig(t *testing.T) {
 	}
 }
 
+func TestLoadServerConfig_FileConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/server.json"
+	cfg := `{"address":"0.0.0.0:1234","restore":true,"store_interval":"5s","store_file":"/tmp/file.db","database_dsn":"dsn","crypto_key":"priv.pem","key":"hmac","audit_file":"audit.log","audit_url":"https://audit"}`
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("CONFIG", path)
+	for _, k := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "KEY", "DATABASE_DSN", "STORE_FILE"} {
+		t.Setenv(k, "")
+	}
+
+	got, err := LoadServerConfig([]string{}, nil)
+	if err != nil {
+		t.Fatalf("LoadServerConfig error: %v", err)
+	}
+
+	if got.Address != "0.0.0.0:1234" || got.File != "/tmp/file.db" || got.Interval != 5*time.Second {
+		t.Fatalf("file config mismatch: %+v", got)
+	}
+	if !got.Restore || got.DSN != "dsn" || got.CryptoKey != "priv.pem" || got.Key != "hmac" {
+		t.Fatalf("file config mismatch: %+v", got)
+	}
+	if got.AuditFile != "audit.log" || got.AuditURL != "https://audit" {
+		t.Fatalf("audit mismatch: %+v", got)
+	}
+}
+
+func TestLoadServerConfig_FileConfig_Priority(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/server.json"
+	cfg := `{"address":"0.0.0.0:1234","store_interval":"5s","store_file":"file.json"}`
+	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	t.Setenv("CONFIG", path)
+	t.Setenv("ADDRESS", "127.0.0.1:7777")
+	t.Setenv("STORE_INTERVAL", "9s")
+
+	got, err := LoadServerConfig([]string{"-f", "flag.json"}, nil)
+	if err != nil {
+		t.Fatalf("LoadServerConfig error: %v", err)
+	}
+	if got.Address != "127.0.0.1:7777" {
+		t.Fatalf("Address=%q want %q", got.Address, "127.0.0.1:7777")
+	}
+	if got.Interval != 9*time.Second {
+		t.Fatalf("Interval=%v want %v", got.Interval, 9*time.Second)
+	}
+	if got.File != "flag.json" {
+		t.Fatalf("File=%q want %q", got.File, "flag.json")
+	}
+}
+
 func TestNormalizeListenAndServeURL(t *testing.T) {
 	cases := map[string]string{
 		"":                        ":8080",
@@ -183,3 +240,42 @@ func TestNormalizeListenAndServeURL(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveServerAddress_Invalid(t *testing.T) {
+	_, err := resolveServerAddress(serverFlagOptions{}, serverFileConfig{Address: strPtr("http://example.com")})
+	if err == nil {
+		t.Fatal("expected error for address without port")
+	}
+}
+
+func TestResolveServerFile_EnvOverridesFlagAndFile(t *testing.T) {
+	t.Setenv("FILE_STORAGE_PATH", "env.json")
+	t.Setenv("STORE_FILE", "env-store.json")
+
+	flags := serverFlagOptions{fileOpt: "flag.json"}
+	fileCfg := serverFileConfig{StoreFile: strPtr("file.json")}
+	got := resolveServerFile(flags, fileCfg)
+	if got != "env-store.json" {
+		t.Fatalf("resolveServerFile=%q want %q", got, "env-store.json")
+	}
+}
+
+func TestResolveServerInterval_InvalidFileConfig(t *testing.T) {
+	_, err := resolveServerInterval(serverFlagOptions{}, serverFileConfig{
+		StoreInterval: strPtr("not-a-duration"),
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid store_interval")
+	}
+}
+
+func TestResolveServerRestore_FromFileConfig(t *testing.T) {
+	got := resolveServerRestore(serverFlagOptions{}, serverFileConfig{Restore: boolPtr(true)})
+	if !got {
+		t.Fatal("expected restore to be true")
+	}
+}
+
+func strPtr(v string) *string { return &v }
+
+func boolPtr(v bool) *bool { return &v }
