@@ -45,9 +45,9 @@ func main() {
 		log.Fatalf("failed to init publisher: %v", err)
 	}
 	collector := runtime.New()
-	runner := agentsvc.New(mapAgentConfig(cfg), collector, pub)
+	runner := agentsvc.New(cfg, collector, pub)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	log.Printf("agent started: server=%s poll=%s report=%s limit=%d",
@@ -59,12 +59,4 @@ func main() {
 
 func printBuildInfo() {
 	util.PrintBuildInfo(buildVersion, buildDate, buildCommit)
-}
-
-func mapAgentConfig(cfg config.AgentConfig) agentsvc.Config {
-	return agentsvc.Config{
-		PollInterval:   cfg.PollInterval,
-		ReportInterval: cfg.ReportInterval,
-		RateLimit:      cfg.RateLimit,
-	}
 }

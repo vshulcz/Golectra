@@ -254,9 +254,9 @@ func TestResolveServerFile_EnvOverridesFlagAndFile(t *testing.T) {
 
 	flags := serverFlagOptions{fileOpt: "flag.json"}
 	fileCfg := serverFileConfig{StoreFile: strPtr("file.json")}
-	got := resolveServerFile(flags, fileCfg)
+	got := resolveString([]string{"STORE_FILE", "FILE_STORAGE_PATH"}, flags.fileOpt, fileValue(fileCfg.StoreFile, defaultFilePath))
 	if got != "env-store.json" {
-		t.Fatalf("resolveServerFile=%q want %q", got, "env-store.json")
+		t.Fatalf("resolveString=%q want %q", got, "env-store.json")
 	}
 }
 

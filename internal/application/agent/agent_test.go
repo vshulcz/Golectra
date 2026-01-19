@@ -320,3 +320,37 @@ func TestService_Run_RespectsRateLimit(t *testing.T) {
 			pub.maxInflight, cfg.RateLimit)
 	}
 }
+
+func TestService_Run_FlushesOnCancel(t *testing.T) {
+	coll := &fakeCollector{
+		gauges:   map[string]float64{"Alloc": 1.0},
+		counters: map[string]int64{"PollCount": 1},
+	}
+	pub := &fakePublisher{}
+	cfg := Config{
+		PollInterval:   1 * time.Millisecond,
+		ReportInterval: 5 * time.Second,
+		RateLimit:      1,
+	}
+	svc := New(cfg, coll, pub)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- svc.Run(ctx) }()
+
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("Run error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Run did not exit after cancel")
+	}
+
+	if pub.batchCalls != 1 {
+		t.Fatalf("batchCalls=%d want=1", pub.batchCalls)
+	}
+}

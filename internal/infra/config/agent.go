@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	agentsvc "github.com/vshulcz/Golectra/internal/application/agent"
 )
 
 const (
@@ -17,14 +19,7 @@ const (
 )
 
 // AgentConfig holds runtime parameters for the metrics agent.
-type AgentConfig struct {
-	Address        string
-	Key            string
-	CryptoKey      string
-	PollInterval   time.Duration
-	ReportInterval time.Duration
-	RateLimit      int
-}
+type AgentConfig = agentsvc.Config
 
 // LoadAgentConfig resolves CLI flags, environment variables, and defaults (ENV > CLI > defaults).
 func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {

@@ -33,8 +33,7 @@ func (r *Service) Run(ctx context.Context) error {
 	defer r.collector.Stop()
 
 	r.sender = NewBatchPublisher(r.pub, r.cfg.RateLimit)
-	r.sender.Start(ctx)
-	defer r.sender.Stop()
+	r.sender.Start(context.Background())
 
 	ticker := time.NewTicker(r.cfg.ReportInterval)
 	defer ticker.Stop()
@@ -42,6 +41,8 @@ func (r *Service) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			r.enqueueSnapshot()
+			r.sender.Stop()
 			return nil
 		case <-ticker.C:
 			r.enqueueSnapshot()

@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/vshulcz/Golectra/internal/application/metrics"
@@ -48,32 +50,17 @@ func run(args []string) error {
 	}
 	defer cleanup()
 
-	repo, persister := buildRepoAndPersister(cfg, logger)
-	onChanged := buildSnapshotHook(persister, logger)
-
-	auditor := buildAuditor(cfg, logger)
-	svc := metrics.New(repo, onChanged, auditor)
-	defer svc.Close()
-	h := ginserver.NewHandler(svc)
-
-	decrypter, err := loadDecrypter(cfg)
+	env, err := buildServerEnv(cfg, logger)
 	if err != nil {
 		return err
 	}
-
-	r := ginserver.NewRouter(h, logger,
-		middlewares.ZapLogger(logger),
-		middlewares.DecryptPayload(decrypter),
-		middlewares.GzipRequest(),
-		middlewares.GzipResponse(),
-		middlewares.HashSHA256(cfg.Key),
-	)
+	defer env.svc.Close()
 
 	logConfig(cfg)
-	startPeriodicSave(cfg, repo, persister, logger)
+	ctx, stop := signalContext()
+	defer stop()
 
-	srv := newHTTPServer(cfg, r)
-	return serve(srv)
+	return serveWithSignals(ctx, env, logger)
 }
 
 func buildAuditor(cfg config.ServerConfig, logger *zap.Logger) ports.AuditPublisher {
@@ -132,27 +119,113 @@ func loadDecrypter(cfg config.ServerConfig) (ports.PayloadDecrypter, error) {
 	return rsaenvelope.NewDecrypter(key), nil
 }
 
+type serverEnv struct {
+	repo         ports.MetricsRepo
+	persister    ports.Persister
+	svc          *metrics.Service
+	srv          *http.Server
+	stopPeriodic func()
+}
+
+func buildServerEnv(cfg config.ServerConfig, logger *zap.Logger) (*serverEnv, error) {
+	repo, persister := buildRepoAndPersister(cfg, logger)
+	onChanged := buildSnapshotHook(persister, logger)
+
+	auditor := buildAuditor(cfg, logger)
+	svc := metrics.New(repo, onChanged, auditor)
+
+	router, err := buildRouter(cfg, logger, svc)
+	if err != nil {
+		svc.Close()
+		return nil, err
+	}
+
+	srv := newHTTPServer(cfg, router)
+	stopPeriodic := startPeriodicSave(cfg, repo, persister, logger)
+
+	return &serverEnv{
+		repo:         repo,
+		persister:    persister,
+		svc:          svc,
+		srv:          srv,
+		stopPeriodic: stopPeriodic,
+	}, nil
+}
+
+func buildRouter(cfg config.ServerConfig, logger *zap.Logger, svc *metrics.Service) (http.Handler, error) {
+	h := ginserver.NewHandler(svc)
+	decrypter, err := loadDecrypter(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return ginserver.NewRouter(h, logger,
+		middlewares.ZapLogger(logger),
+		middlewares.DecryptPayload(decrypter),
+		middlewares.GzipRequest(),
+		middlewares.GzipResponse(),
+		middlewares.HashSHA256(cfg.Key),
+	), nil
+}
+
 func logConfig(cfg config.ServerConfig) {
 	log.Printf("cfg: addr=%s file=%s interval=%v restore=%v dsn=%q audit_file=%q audit_url=%q",
 		cfg.Address, cfg.File, cfg.Interval, cfg.Restore, cfg.DSN, cfg.AuditFile, cfg.AuditURL)
 }
 
-func startPeriodicSave(cfg config.ServerConfig, repo ports.MetricsRepo, persister ports.Persister, logger *zap.Logger) {
-	if cfg.DSN != "" || cfg.Interval <= 0 {
-		return
+func signalContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+}
+
+func serveWithSignals(ctx context.Context, env *serverEnv, logger *zap.Logger) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serve(env.srv)
+	}()
+
+	select {
+	case <-ctx.Done():
+		env.stopPeriodic()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := env.srv.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer saveCancel()
+		return saveSnapshot(saveCtx, env.repo, env.persister, logger)
+	case err := <-errCh:
+		env.stopPeriodic()
+		return err
+	}
+}
+
+func startPeriodicSave(cfg config.ServerConfig, repo ports.MetricsRepo, persister ports.Persister, logger *zap.Logger) func() {
+	if cfg.DSN != "" || cfg.Interval <= 0 || persister == nil {
+		return func() {}
 	}
 	ticker := time.NewTicker(cfg.Interval)
+	done := make(chan struct{})
 	go func() {
-		for range ticker.C {
-			snap, err := repo.Snapshot(context.Background())
-			if err != nil || persister == nil {
-				continue
-			}
-			if err := persister.Save(context.Background(), snap); err != nil {
-				logger.Warn("periodic save failed", zap.Error(err))
+		for {
+			select {
+			case <-ticker.C:
+				snap, err := repo.Snapshot(context.Background())
+				if err != nil {
+					continue
+				}
+				if err := persister.Save(context.Background(), snap); err != nil {
+					logger.Warn("periodic save failed", zap.Error(err))
+				}
+			case <-done:
+				ticker.Stop()
+				return
 			}
 		}
 	}()
+	return func() {
+		close(done)
+	}
 }
 
 func newHTTPServer(cfg config.ServerConfig, handler http.Handler) *http.Server {
@@ -168,6 +241,22 @@ func newHTTPServer(cfg config.ServerConfig, handler http.Handler) *http.Server {
 
 func serve(srv *http.Server) error {
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+func saveSnapshot(ctx context.Context, repo ports.MetricsRepo, persister ports.Persister, logger *zap.Logger) error {
+	if repo == nil || persister == nil {
+		return nil
+	}
+	snap, err := repo.Snapshot(ctx)
+	if err != nil {
+		logger.Warn("snapshot failed", zap.Error(err))
+		return err
+	}
+	if err := persister.Save(ctx, snap); err != nil {
+		logger.Warn("snapshot save failed", zap.Error(err))
 		return err
 	}
 	return nil

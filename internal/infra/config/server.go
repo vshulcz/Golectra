@@ -108,12 +108,12 @@ func buildServerConfig(flags serverFlagOptions, fileCfg serverFileConfig) (Serve
 	if err != nil {
 		return ServerConfig{}, err
 	}
-	file := resolveServerFile(flags, fileCfg)
-	dsn := resolveServerDSN(flags, fileCfg)
-	key := resolveServerKey(flags, fileCfg)
-	cryptoKey := resolveServerCryptoKey(flags, fileCfg)
-	auditFile := resolveServerAuditFile(flags, fileCfg)
-	auditURL := resolveServerAuditURL(flags, fileCfg)
+	file := resolveString([]string{"STORE_FILE", "FILE_STORAGE_PATH"}, flags.fileOpt, fileValue(fileCfg.StoreFile, defaultFilePath))
+	dsn := resolveString([]string{"DATABASE_DSN"}, flags.dsnOpt, fileValue(fileCfg.DatabaseDSN, ""))
+	key := resolveString([]string{"KEY"}, flags.keyOpt, fileValue(fileCfg.Key, ""))
+	cryptoKey := resolveString([]string{"CRYPTO_KEY"}, flags.cryptoKeyOpt, fileValue(fileCfg.CryptoKey, ""))
+	auditFile := resolveString([]string{"AUDIT_FILE"}, flags.auditFileOpt, fileValue(fileCfg.AuditFile, ""))
+	auditURL := resolveString([]string{"AUDIT_URL"}, flags.auditURLOpt, fileValue(fileCfg.AuditURL, ""))
 	interval, err := resolveServerInterval(flags, fileCfg)
 	if err != nil {
 		return ServerConfig{}, err
@@ -134,74 +134,13 @@ func buildServerConfig(flags serverFlagOptions, fileCfg serverFileConfig) (Serve
 }
 
 func resolveServerAddress(flags serverFlagOptions, fileCfg serverFileConfig) (string, error) {
-	fileAddr := defaultListenAndServeAddr
-	if fileCfg.Address != nil {
-		fileAddr = *fileCfg.Address
-	}
-	addr := FromEnvOrFlag("ADDRESS", flags.addrOpt, fileAddr)
+	fileAddr := fileValue(fileCfg.Address, defaultListenAndServeAddr)
+	addr := resolveString([]string{"ADDRESS"}, flags.addrOpt, fileAddr)
 	addr = normalizeListenAndServeURL(addr)
 	if _, port, err := net.SplitHostPort(addr); err != nil || port == "" {
 		return "", fmt.Errorf("invalid listen address: %q", addr)
 	}
 	return addr, nil
-}
-
-func resolveServerFile(flags serverFlagOptions, fileCfg serverFileConfig) string {
-	fileDef := defaultFilePath
-	if fileCfg.StoreFile != nil {
-		fileDef = *fileCfg.StoreFile
-	}
-	file := fileDef
-	if v := strings.TrimSpace(flags.fileOpt); v != "" {
-		file = v
-	}
-	if v := strings.TrimSpace(os.Getenv("FILE_STORAGE_PATH")); v != "" {
-		file = v
-	}
-	if v := strings.TrimSpace(os.Getenv("STORE_FILE")); v != "" {
-		file = v
-	}
-	return file
-}
-
-func resolveServerDSN(flags serverFlagOptions, fileCfg serverFileConfig) string {
-	fileDSN := ""
-	if fileCfg.DatabaseDSN != nil {
-		fileDSN = *fileCfg.DatabaseDSN
-	}
-	return FromEnvOrFlag("DATABASE_DSN", flags.dsnOpt, fileDSN)
-}
-
-func resolveServerKey(flags serverFlagOptions, fileCfg serverFileConfig) string {
-	fileKey := ""
-	if fileCfg.Key != nil {
-		fileKey = *fileCfg.Key
-	}
-	return FromEnvOrFlag("KEY", flags.keyOpt, fileKey)
-}
-
-func resolveServerCryptoKey(flags serverFlagOptions, fileCfg serverFileConfig) string {
-	fileCryptoKey := ""
-	if fileCfg.CryptoKey != nil {
-		fileCryptoKey = *fileCfg.CryptoKey
-	}
-	return FromEnvOrFlag("CRYPTO_KEY", flags.cryptoKeyOpt, fileCryptoKey)
-}
-
-func resolveServerAuditFile(flags serverFlagOptions, fileCfg serverFileConfig) string {
-	fileAuditFile := ""
-	if fileCfg.AuditFile != nil {
-		fileAuditFile = *fileCfg.AuditFile
-	}
-	return FromEnvOrFlag("AUDIT_FILE", flags.auditFileOpt, fileAuditFile)
-}
-
-func resolveServerAuditURL(flags serverFlagOptions, fileCfg serverFileConfig) string {
-	fileAuditURL := ""
-	if fileCfg.AuditURL != nil {
-		fileAuditURL = *fileCfg.AuditURL
-	}
-	return FromEnvOrFlag("AUDIT_URL", flags.auditURLOpt, fileAuditURL)
 }
 
 func resolveServerInterval(flags serverFlagOptions, fileCfg serverFileConfig) (time.Duration, error) {
@@ -226,4 +165,23 @@ func resolveServerRestore(flags serverFlagOptions, fileCfg serverFileConfig) boo
 		fileRestore = *fileCfg.Restore
 	}
 	return FromEnvOrFlagBool("RESTORE", flags.restoreOpt, fileRestore)
+}
+
+func resolveString(envKeys []string, flagVal, fileVal string) string {
+	for _, key := range envKeys {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+			return v
+		}
+	}
+	if v := strings.TrimSpace(flagVal); v != "" {
+		return v
+	}
+	return fileVal
+}
+
+func fileValue(ptr *string, def string) string {
+	if ptr == nil {
+		return def
+	}
+	return *ptr
 }
