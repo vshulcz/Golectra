@@ -129,6 +129,7 @@ You can use ENV, CLI flags, or defaults (ENV > CLI > defaults).
 | File storage     | `FILE_STORAGE_PATH` | `-f`            | `metrics-db.json` | JSON snapshot file                                                    |
 | Postgres DSN     | `DATABASE_DSN`      | `-d`            | *empty*           | e.g. `postgres://user:pass@localhost:5432/db?sslmode=disable`         |
 | Secret key       | `KEY`               | `-k`            | *empty*           | enables `HashSHA256`                                                  |
+| Crypto key       | `CRYPTO_KEY`        | `-crypto-key`   | *empty*           | path to RSA private key for decrypting agent payloads                 |
 | Store interval   | `STORE_INTERVAL`    | `-i`            | `300s`            | `0` = sync writes                                                     |
 | Restore on start | `RESTORE`           | `-r`            | `false`           | load from file at boot                                                |
 | Audit file       | `AUDIT_FILE`        | `--audit-file`  | *empty*           | newline-delimited JSON audit log fan-out target (disabled when empty) |
@@ -139,6 +140,7 @@ You can use ENV, CLI flags, or defaults (ENV > CLI > defaults).
 | --------------- | ----------------- | ---- | ----------------------- | ----------------------- |
 | Server address  | `ADDRESS`         | `-a` | `http://localhost:8080` | URL or `host:port`      |
 | Secret key      | `KEY`             | `-k` | *empty*                 | adds `HashSHA256`       |
+| Crypto key      | `CRYPTO_KEY`      | `-crypto-key` | *empty*           | path to RSA public key for encrypting requests |
 | Report interval | `REPORT_INTERVAL` | `-r` | `10s`                   | send frequency          |
 | Poll interval   | `POLL_INTERVAL`   | `-p` | `2s`                    | sample frequency        |
 | Rate limit      | `RATE_LIMIT`      | `-l` | `1`                     | concurrent send workers |
