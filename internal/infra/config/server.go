@@ -21,15 +21,16 @@ const (
 
 // ServerConfig describes how the HTTP server listens, stores data, and emits audit logs.
 type ServerConfig struct {
-	Address   string
-	File      string
-	DSN       string
-	Key       string
-	CryptoKey string
-	Interval  time.Duration
-	Restore   bool
-	AuditFile string
-	AuditURL  string
+	Address       string
+	File          string
+	DSN           string
+	Key           string
+	CryptoKey     string
+	TrustedSubnet string
+	Interval      time.Duration
+	Restore       bool
+	AuditFile     string
+	AuditURL      string
 }
 
 // LoadServerConfig resolves CLI flags, environment variables, and defaults (ENV > CLI > defaults).
@@ -65,16 +66,17 @@ func normalizeListenAndServeURL(s string) string {
 }
 
 type serverFlagOptions struct {
-	addrOpt      string
-	fileOpt      string
-	dsnOpt       string
-	keyOpt       string
-	cryptoKeyOpt string
-	configOpt    string
-	ivalOpt      int
-	restoreOpt   bool
-	auditFileOpt string
-	auditURLOpt  string
+	addrOpt          string
+	fileOpt          string
+	dsnOpt           string
+	keyOpt           string
+	cryptoKeyOpt     string
+	configOpt        string
+	ivalOpt          int
+	restoreOpt       bool
+	trustedSubnetOpt string
+	auditFileOpt     string
+	auditURLOpt      string
 }
 
 func parseServerFlags(args []string, out io.Writer) (serverFlagOptions, error) {
@@ -90,6 +92,7 @@ func parseServerFlags(args []string, out io.Writer) (serverFlagOptions, error) {
 	fs.StringVar(&opts.dsnOpt, "d", "", fmt.Sprintf("DATABASE_DSN for Postgres, default: %s", defaultDSN))
 	fs.StringVar(&opts.keyOpt, "k", "", "secret key for HashSHA256")
 	fs.StringVar(&opts.cryptoKeyOpt, "crypto-key", "", "path to RSA private key for request decryption")
+	fs.StringVar(&opts.trustedSubnetOpt, "t", "", "trusted subnet (CIDR) for agent requests")
 	fs.StringVar(&opts.configOpt, "c", "", "path to JSON config file")
 	fs.StringVar(&opts.configOpt, "config", "", "path to JSON config file")
 	fs.IntVar(&opts.ivalOpt, "i", -1, fmt.Sprintf("STORE_INTERVAL seconds (0 - sync), default: %d", defaultStoreInterval))
@@ -112,6 +115,7 @@ func buildServerConfig(flags serverFlagOptions, fileCfg serverFileConfig) (Serve
 	dsn := resolveString([]string{"DATABASE_DSN"}, flags.dsnOpt, fileValue(fileCfg.DatabaseDSN, ""))
 	key := resolveString([]string{"KEY"}, flags.keyOpt, fileValue(fileCfg.Key, ""))
 	cryptoKey := resolveString([]string{"CRYPTO_KEY"}, flags.cryptoKeyOpt, fileValue(fileCfg.CryptoKey, ""))
+	trustedSubnet := resolveString([]string{"TRUSTED_SUBNET"}, flags.trustedSubnetOpt, fileValue(fileCfg.TrustedSubnet, ""))
 	auditFile := resolveString([]string{"AUDIT_FILE"}, flags.auditFileOpt, fileValue(fileCfg.AuditFile, ""))
 	auditURL := resolveString([]string{"AUDIT_URL"}, flags.auditURLOpt, fileValue(fileCfg.AuditURL, ""))
 	interval, err := resolveServerInterval(flags, fileCfg)
@@ -121,15 +125,16 @@ func buildServerConfig(flags serverFlagOptions, fileCfg serverFileConfig) (Serve
 	restore := resolveServerRestore(flags, fileCfg)
 
 	return ServerConfig{
-		Address:   addr,
-		File:      file,
-		DSN:       dsn,
-		Key:       key,
-		CryptoKey: cryptoKey,
-		Interval:  interval,
-		Restore:   restore,
-		AuditFile: auditFile,
-		AuditURL:  auditURL,
+		Address:       addr,
+		File:          file,
+		DSN:           dsn,
+		Key:           key,
+		CryptoKey:     cryptoKey,
+		TrustedSubnet: trustedSubnet,
+		Interval:      interval,
+		Restore:       restore,
+		AuditFile:     auditFile,
+		AuditURL:      auditURL,
 	}, nil
 }
 

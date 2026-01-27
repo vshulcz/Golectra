@@ -30,6 +30,7 @@ const (
 	updatesPath     = "/updates"
 	allocMetricID   = "Alloc"
 	gaugeMetricType = "gauge"
+	loopbackIP      = "127.0.0.1"
 )
 
 func mustWrite(t *testing.T, w io.Writer, data []byte) {
@@ -777,6 +778,59 @@ func TestSendOne_NoHashHeader(t *testing.T) {
 	val := 3.14
 	if err := c.SendOne(context.Background(), domain.Metrics{ID: allocMetricID, MType: gaugeMetricType, Value: &val}); err != nil {
 		t.Fatalf("SendOne error: %v", err)
+	}
+}
+
+func TestSendOne_RealIPHeader_Present(t *testing.T) {
+	want := localIP()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("X-Real-IP")
+		if got == "" {
+			t.Fatal("expected X-Real-IP header to be present")
+		}
+		if want != "" && got != want {
+			t.Fatalf("X-Real-IP=%q want %q", got, want)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c, err := New(srv.URL, nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	val := 3.14
+	if err := c.SendOne(context.Background(), domain.Metrics{ID: allocMetricID, MType: gaugeMetricType, Value: &val}); err != nil {
+		t.Fatalf("SendOne error: %v", err)
+	}
+}
+
+func TestLocalIPFromAddrs_PrefersNonLoopback(t *testing.T) {
+	addrs := []net.Addr{
+		&net.IPNet{IP: net.ParseIP(loopbackIP)},
+		&net.IPNet{IP: net.ParseIP("192.168.1.10")},
+	}
+	got := localIPFromAddrs(addrs)
+	if got != "192.168.1.10" {
+		t.Fatalf("localIPFromAddrs=%q want %q", got, "192.168.1.10")
+	}
+}
+
+func TestLocalIPFromAddrs_FallbackLoopback(t *testing.T) {
+	addrs := []net.Addr{
+		&net.IPNet{IP: net.ParseIP(loopbackIP)},
+	}
+	got := localIPFromAddrs(addrs)
+	if got != loopbackIP {
+		t.Fatalf("localIPFromAddrs=%q want %q", got, loopbackIP)
+	}
+}
+
+func TestLocalIPFromAddrs_DefaultWhenEmpty(t *testing.T) {
+	got := localIPFromAddrs(nil)
+	if got != loopbackIP {
+		t.Fatalf("localIPFromAddrs=%q want %q", got, loopbackIP)
 	}
 }
 

@@ -40,14 +40,16 @@ func TestLoadServerConfig(t *testing.T) {
 				"RESTORE":           "false",
 				"AUDIT_FILE":        "env-audit.log",
 				"AUDIT_URL":         "https://audit.example.com",
+				"TRUSTED_SUBNET":    "10.1.0.0/16",
 			},
 			want: ServerConfig{
-				Address:   "0.0.0.0:1234",
-				File:      "env.json",
-				Interval:  777 * time.Second,
-				Restore:   false,
-				AuditFile: "env-audit.log",
-				AuditURL:  "https://audit.example.com",
+				Address:       "0.0.0.0:1234",
+				File:          "env.json",
+				Interval:      777 * time.Second,
+				Restore:       false,
+				AuditFile:     "env-audit.log",
+				AuditURL:      "https://audit.example.com",
+				TrustedSubnet: "10.1.0.0/16",
 			},
 		},
 		{
@@ -121,7 +123,7 @@ func TestLoadServerConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, k := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "CONFIG", "KEY", "DATABASE_DSN", "STORE_FILE"} {
+			for _, k := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "CONFIG", "KEY", "DATABASE_DSN", "STORE_FILE", "TRUSTED_SUBNET"} {
 				t.Setenv(k, "")
 			}
 			for k, v := range tt.env {
@@ -167,13 +169,13 @@ func TestLoadServerConfig(t *testing.T) {
 func TestLoadServerConfig_FileConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/server.json"
-	cfg := `{"address":"0.0.0.0:1234","restore":true,"store_interval":"5s","store_file":"/tmp/file.db","database_dsn":"dsn","crypto_key":"priv.pem","key":"hmac","audit_file":"audit.log","audit_url":"https://audit"}`
+	cfg := `{"address":"0.0.0.0:1234","restore":true,"store_interval":"5s","store_file":"/tmp/file.db","database_dsn":"dsn","crypto_key":"priv.pem","key":"hmac","trusted_subnet":"10.0.0.0/24","audit_file":"audit.log","audit_url":"https://audit"}`
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
 	t.Setenv("CONFIG", path)
-	for _, k := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "KEY", "DATABASE_DSN", "STORE_FILE"} {
+	for _, k := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "KEY", "DATABASE_DSN", "STORE_FILE", "TRUSTED_SUBNET"} {
 		t.Setenv(k, "")
 	}
 
@@ -185,7 +187,7 @@ func TestLoadServerConfig_FileConfig(t *testing.T) {
 	if got.Address != "0.0.0.0:1234" || got.File != "/tmp/file.db" || got.Interval != 5*time.Second {
 		t.Fatalf("file config mismatch: %+v", got)
 	}
-	if !got.Restore || got.DSN != "dsn" || got.CryptoKey != "priv.pem" || got.Key != "hmac" {
+	if !got.Restore || got.DSN != "dsn" || got.CryptoKey != "priv.pem" || got.Key != "hmac" || got.TrustedSubnet != "10.0.0.0/24" {
 		t.Fatalf("file config mismatch: %+v", got)
 	}
 	if got.AuditFile != "audit.log" || got.AuditURL != "https://audit" {
@@ -204,6 +206,7 @@ func TestLoadServerConfig_FileConfig_Priority(t *testing.T) {
 	t.Setenv("CONFIG", path)
 	t.Setenv("ADDRESS", "127.0.0.1:7777")
 	t.Setenv("STORE_INTERVAL", "9s")
+	t.Setenv("TRUSTED_SUBNET", "192.168.1.0/24")
 
 	got, err := LoadServerConfig([]string{"-f", "flag.json"}, nil)
 	if err != nil {
@@ -217,6 +220,9 @@ func TestLoadServerConfig_FileConfig_Priority(t *testing.T) {
 	}
 	if got.File != "flag.json" {
 		t.Fatalf("File=%q want %q", got.File, "flag.json")
+	}
+	if got.TrustedSubnet != "192.168.1.0/24" {
+		t.Fatalf("TrustedSubnet=%q want %q", got.TrustedSubnet, "192.168.1.0/24")
 	}
 }
 
