@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 	fs.SetOutput(out)
 
 	var addrOpt string
+	var grpcAddrOpt string
 	var keyOpt string
 	var cryptoKeyOpt string
 	var configOpt string
@@ -39,6 +41,8 @@ func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 	var limitOpt int
 
 	fs.StringVar(&addrOpt, "a", "", fmt.Sprintf("server address (host:port or URL), default: %s", defaultServerAddr))
+	fs.StringVar(&grpcAddrOpt, "g", "", "gRPC server address (host:port)")
+	fs.StringVar(&grpcAddrOpt, "grpc-address", "", "gRPC server address (host:port)")
 	fs.StringVar(&keyOpt, "k", "", "secret key for HashSHA256 header")
 	fs.StringVar(&cryptoKeyOpt, "crypto-key", "", "path to RSA public key for request encryption")
 	fs.StringVar(&configOpt, "c", "", "path to JSON config file")
@@ -65,6 +69,18 @@ func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 	addr = normalizeAddressURL(addr)
 	if _, err := url.ParseRequestURI(addr); err != nil {
 		return AgentConfig{}, fmt.Errorf("invalid server address: %q", addr)
+	}
+
+	fileGRPCAddr := ""
+	if fileCfg.GRPCAddress != nil {
+		fileGRPCAddr = *fileCfg.GRPCAddress
+	}
+	grpcAddr := FromEnvOrFlag("GRPC_ADDRESS", grpcAddrOpt, fileGRPCAddr)
+	grpcAddr = normalizeGRPCAddress(grpcAddr)
+	if grpcAddr != "" {
+		if _, _, err := net.SplitHostPort(grpcAddr); err != nil {
+			return AgentConfig{}, fmt.Errorf("invalid gRPC server address: %q", grpcAddr)
+		}
 	}
 
 	fileKey := ""
@@ -109,6 +125,7 @@ func LoadAgentConfig(args []string, out io.Writer) (AgentConfig, error) {
 
 	return AgentConfig{
 		Address:        addr,
+		GRPCAddress:    grpcAddr,
 		Key:            key,
 		CryptoKey:      cryptoKey,
 		PollInterval:   poll,
@@ -129,4 +146,23 @@ func normalizeAddressURL(s string) string {
 		return "http://localhost" + s
 	}
 	return "http://" + s
+}
+
+func normalizeGRPCAddress(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+		if u, err := url.Parse(s); err == nil && u.Host != "" {
+			return u.Host
+		}
+	}
+	if strings.HasPrefix(s, ":") {
+		return "localhost" + s
+	}
+	if !strings.Contains(s, ":") {
+		return "localhost:" + s
+	}
+	return s
 }

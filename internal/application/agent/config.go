@@ -5,6 +5,7 @@ import "time"
 // Config holds runtime parameters needed by the agent application service.
 type Config struct {
 	Address        string
+	GRPCAddress    string
 	Key            string
 	CryptoKey      string
 	PollInterval   time.Duration

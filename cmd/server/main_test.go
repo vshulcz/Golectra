@@ -202,6 +202,35 @@ func TestBuildServerEnv_Success(t *testing.T) {
 	env.svc.Close()
 }
 
+func TestBuildGRPCServer_EmptyAddress(t *testing.T) {
+	svc := metrics.New(&fakeRepo{}, nil, nil)
+	defer svc.Close()
+
+	cfg := config.ServerConfig{}
+	srv, lis, err := buildGRPCServer(cfg, svc)
+	if err != nil {
+		t.Fatalf("buildGRPCServer error: %v", err)
+	}
+	if srv != nil || lis != nil {
+		t.Fatalf("expected nil grpc server when address is empty")
+	}
+}
+
+func TestBuildGRPCServer_Binds(t *testing.T) {
+	svc := metrics.New(&fakeRepo{}, nil, nil)
+	defer svc.Close()
+
+	cfg := config.ServerConfig{GRPCAddress: "127.0.0.1:0"}
+	srv, lis, err := buildGRPCServer(cfg, svc)
+	if err != nil {
+		t.Fatalf("buildGRPCServer error: %v", err)
+	}
+	if srv == nil || lis == nil {
+		t.Fatal("expected grpc server and listener")
+	}
+	stopGRPC(srv, lis)
+}
+
 func TestRun_InvalidArgs(t *testing.T) {
 	if err := run([]string{"-a", "http://example.com"}); err == nil {
 		t.Fatal("expected error from invalid listen address")
