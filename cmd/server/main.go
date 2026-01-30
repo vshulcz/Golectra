@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -158,9 +160,14 @@ func buildRouter(cfg config.ServerConfig, logger *zap.Logger, svc *metrics.Servi
 	if err != nil {
 		return nil, err
 	}
+	subnet, err := parseTrustedSubnet(cfg.TrustedSubnet)
+	if err != nil {
+		return nil, err
+	}
 
 	return ginserver.NewRouter(h, logger,
 		middlewares.ZapLogger(logger),
+		middlewares.TrustedSubnet(subnet),
 		middlewares.DecryptPayload(decrypter),
 		middlewares.GzipRequest(),
 		middlewares.GzipResponse(),
@@ -169,12 +176,24 @@ func buildRouter(cfg config.ServerConfig, logger *zap.Logger, svc *metrics.Servi
 }
 
 func logConfig(cfg config.ServerConfig) {
-	log.Printf("cfg: addr=%s file=%s interval=%v restore=%v dsn=%q audit_file=%q audit_url=%q",
-		cfg.Address, cfg.File, cfg.Interval, cfg.Restore, cfg.DSN, cfg.AuditFile, cfg.AuditURL)
+	log.Printf("cfg: addr=%s file=%s interval=%v restore=%v dsn=%q audit_file=%q audit_url=%q trusted_subnet=%q",
+		cfg.Address, cfg.File, cfg.Interval, cfg.Restore, cfg.DSN, cfg.AuditFile, cfg.AuditURL, cfg.TrustedSubnet)
 }
 
 func signalContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+}
+
+func parseTrustedSubnet(cidr string) (*net.IPNet, error) {
+	cidr = strings.TrimSpace(cidr)
+	if cidr == "" {
+		return nil, nil
+	}
+	_, subnet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return nil, err
+	}
+	return subnet, nil
 }
 
 func serveWithSignals(ctx context.Context, env *serverEnv, logger *zap.Logger) error {
