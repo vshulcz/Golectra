@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -17,11 +19,14 @@ import (
 	auditremote "github.com/vshulcz/Golectra/internal/infra/audit/remote"
 	"github.com/vshulcz/Golectra/internal/infra/config"
 	"github.com/vshulcz/Golectra/internal/infra/crypto/rsaenvelope"
+	grpcserver "github.com/vshulcz/Golectra/internal/infra/grpcserver"
 	"github.com/vshulcz/Golectra/internal/infra/http/ginserver"
 	"github.com/vshulcz/Golectra/internal/infra/http/ginserver/middlewares"
 	"github.com/vshulcz/Golectra/internal/ports"
+	pb "github.com/vshulcz/Golectra/internal/proto/metrics"
 	"github.com/vshulcz/Golectra/pkg/util"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 var (
@@ -124,6 +129,8 @@ type serverEnv struct {
 	persister    ports.Persister
 	svc          *metrics.Service
 	srv          *http.Server
+	grpcSrv      *grpc.Server
+	grpcLis      net.Listener
 	stopPeriodic func()
 }
 
@@ -141,6 +148,12 @@ func buildServerEnv(cfg config.ServerConfig, logger *zap.Logger) (*serverEnv, er
 	}
 
 	srv := newHTTPServer(cfg, router)
+	grpcSrv, grpcLis, err := buildGRPCServer(cfg, svc)
+	if err != nil {
+		_ = srv.Close()
+		svc.Close()
+		return nil, err
+	}
 	stopPeriodic := startPeriodicSave(cfg, repo, persister, logger)
 
 	return &serverEnv{
@@ -148,6 +161,8 @@ func buildServerEnv(cfg config.ServerConfig, logger *zap.Logger) (*serverEnv, er
 		persister:    persister,
 		svc:          svc,
 		srv:          srv,
+		grpcSrv:      grpcSrv,
+		grpcLis:      grpcLis,
 		stopPeriodic: stopPeriodic,
 	}, nil
 }
@@ -158,9 +173,14 @@ func buildRouter(cfg config.ServerConfig, logger *zap.Logger, svc *metrics.Servi
 	if err != nil {
 		return nil, err
 	}
+	subnet, err := parseTrustedSubnet(cfg.TrustedSubnet)
+	if err != nil {
+		return nil, err
+	}
 
 	return ginserver.NewRouter(h, logger,
 		middlewares.ZapLogger(logger),
+		middlewares.TrustedSubnet(subnet),
 		middlewares.DecryptPayload(decrypter),
 		middlewares.GzipRequest(),
 		middlewares.GzipResponse(),
@@ -169,19 +189,36 @@ func buildRouter(cfg config.ServerConfig, logger *zap.Logger, svc *metrics.Servi
 }
 
 func logConfig(cfg config.ServerConfig) {
-	log.Printf("cfg: addr=%s file=%s interval=%v restore=%v dsn=%q audit_file=%q audit_url=%q",
-		cfg.Address, cfg.File, cfg.Interval, cfg.Restore, cfg.DSN, cfg.AuditFile, cfg.AuditURL)
+	log.Printf("cfg: addr=%s grpc=%s file=%s interval=%v restore=%v dsn=%q audit_file=%q audit_url=%q trusted_subnet=%q",
+		cfg.Address, cfg.GRPCAddress, cfg.File, cfg.Interval, cfg.Restore, cfg.DSN, cfg.AuditFile, cfg.AuditURL, cfg.TrustedSubnet)
 }
 
 func signalContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 }
 
+func parseTrustedSubnet(cidr string) (*net.IPNet, error) {
+	cidr = strings.TrimSpace(cidr)
+	if cidr == "" {
+		return nil, nil
+	}
+	_, subnet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return nil, err
+	}
+	return subnet, nil
+}
+
 func serveWithSignals(ctx context.Context, env *serverEnv, logger *zap.Logger) error {
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
 	go func() {
 		errCh <- serve(env.srv)
 	}()
+	if env.grpcSrv != nil && env.grpcLis != nil {
+		go func() {
+			errCh <- serveGRPC(env.grpcSrv, env.grpcLis)
+		}()
+	}
 
 	select {
 	case <-ctx.Done():
@@ -191,11 +228,13 @@ func serveWithSignals(ctx context.Context, env *serverEnv, logger *zap.Logger) e
 		if err := env.srv.Shutdown(shutdownCtx); err != nil {
 			return err
 		}
+		stopGRPC(env.grpcSrv, env.grpcLis)
 		saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer saveCancel()
 		return saveSnapshot(saveCtx, env.repo, env.persister, logger)
 	case err := <-errCh:
 		env.stopPeriodic()
+		stopGRPC(env.grpcSrv, env.grpcLis)
 		return err
 	}
 }
@@ -246,6 +285,35 @@ func serve(srv *http.Server) error {
 	return nil
 }
 
+func serveGRPC(srv *grpc.Server, lis net.Listener) error {
+	if srv == nil || lis == nil {
+		return nil
+	}
+	if err := srv.Serve(lis); err != nil {
+		return err
+	}
+	return nil
+}
+
+func stopGRPC(srv *grpc.Server, lis net.Listener) {
+	if lis != nil {
+		_ = lis.Close()
+	}
+	if srv == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		srv.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		srv.Stop()
+	}
+}
+
 func saveSnapshot(ctx context.Context, repo ports.MetricsRepo, persister ports.Persister, logger *zap.Logger) error {
 	if repo == nil || persister == nil {
 		return nil
@@ -264,4 +332,23 @@ func saveSnapshot(ctx context.Context, repo ports.MetricsRepo, persister ports.P
 
 func printBuildInfo() {
 	util.PrintBuildInfo(buildVersion, buildDate, buildCommit)
+}
+
+func buildGRPCServer(cfg config.ServerConfig, svc *metrics.Service) (*grpc.Server, net.Listener, error) {
+	if strings.TrimSpace(cfg.GRPCAddress) == "" {
+		return nil, nil, nil
+	}
+	lc := net.ListenConfig{}
+	lis, err := lc.Listen(context.Background(), "tcp", cfg.GRPCAddress)
+	if err != nil {
+		return nil, nil, err
+	}
+	subnet, err := parseTrustedSubnet(cfg.TrustedSubnet)
+	if err != nil {
+		_ = lis.Close()
+		return nil, nil, err
+	}
+	srv := grpc.NewServer(grpc.UnaryInterceptor(grpcserver.TrustedSubnetInterceptor(subnet)))
+	pb.RegisterMetricsServer(srv, grpcserver.NewMetricsServer(svc))
+	return srv, lis, nil
 }

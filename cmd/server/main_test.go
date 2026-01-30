@@ -135,6 +135,108 @@ func TestBuildRouter(t *testing.T) {
 	}
 }
 
+func TestBuildAuditor_NoTargets(t *testing.T) {
+	logger := zap.NewNop()
+	cfg := config.ServerConfig{}
+	if got := buildAuditor(cfg, logger); got != nil {
+		t.Fatal("expected nil auditor when no targets configured")
+	}
+}
+
+func TestBuildAuditor_FileTarget(t *testing.T) {
+	logger := zap.NewNop()
+	dir := t.TempDir()
+	cfg := config.ServerConfig{AuditFile: dir + "/audit.log"}
+	if got := buildAuditor(cfg, logger); got == nil {
+		t.Fatal("expected auditor to be configured")
+	}
+}
+
+func TestInitLogger(t *testing.T) {
+	logger, cleanup, err := initLogger()
+	if err != nil {
+		t.Fatalf("initLogger error: %v", err)
+	}
+	if logger == nil {
+		t.Fatal("expected logger")
+	}
+	cleanup()
+}
+
+func TestParseTrustedSubnet(t *testing.T) {
+	subnet, err := parseTrustedSubnet("10.0.0.0/24")
+	if err != nil {
+		t.Fatalf("parseTrustedSubnet error: %v", err)
+	}
+	if subnet == nil || subnet.String() != "10.0.0.0/24" {
+		t.Fatalf("subnet=%v want 10.0.0.0/24", subnet)
+	}
+
+	if _, err := parseTrustedSubnet("bad"); err == nil {
+		t.Fatal("expected error for invalid cidr")
+	}
+	if got, err := parseTrustedSubnet(" "); err != nil || got != nil {
+		t.Fatalf("empty subnet: got=%v err=%v", got, err)
+	}
+}
+
+func TestBuildServerEnv_InvalidSubnet(t *testing.T) {
+	logger := zap.NewNop()
+	cfg := config.ServerConfig{TrustedSubnet: "bad"}
+	if _, err := buildServerEnv(cfg, logger); err == nil {
+		t.Fatal("expected error for invalid trusted subnet")
+	}
+}
+
+func TestBuildServerEnv_Success(t *testing.T) {
+	logger := zap.NewNop()
+	cfg := config.ServerConfig{
+		Address:  "127.0.0.1:0",
+		Interval: 0,
+	}
+	env, err := buildServerEnv(cfg, logger)
+	if err != nil {
+		t.Fatalf("buildServerEnv error: %v", err)
+	}
+	env.stopPeriodic()
+	env.svc.Close()
+}
+
+func TestBuildGRPCServer_EmptyAddress(t *testing.T) {
+	svc := metrics.New(&fakeRepo{}, nil, nil)
+	defer svc.Close()
+
+	cfg := config.ServerConfig{}
+	srv, lis, err := buildGRPCServer(cfg, svc)
+	if err != nil {
+		t.Fatalf("buildGRPCServer error: %v", err)
+	}
+	if srv != nil || lis != nil {
+		t.Fatalf("expected nil grpc server when address is empty")
+	}
+}
+
+func TestBuildGRPCServer_Binds(t *testing.T) {
+	svc := metrics.New(&fakeRepo{}, nil, nil)
+	defer svc.Close()
+
+	cfg := config.ServerConfig{GRPCAddress: "127.0.0.1:0"}
+	srv, lis, err := buildGRPCServer(cfg, svc)
+	if err != nil {
+		t.Fatalf("buildGRPCServer error: %v", err)
+	}
+	if srv == nil || lis == nil {
+		t.Fatal("expected grpc server and listener")
+	}
+	stopGRPC(srv, lis)
+}
+
+func TestRun_InvalidArgs(t *testing.T) {
+	if err := run([]string{"-a", "http://example.com"}); err == nil {
+		t.Fatal("expected error from invalid listen address")
+	}
+}
+
 func TestServeWithSignals_ShutsDownAndSaves(t *testing.T) {
 	logger := zap.NewNop()
 	repo := &fakeRepo{snap: domain.Snapshot{}}

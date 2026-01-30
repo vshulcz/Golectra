@@ -27,6 +27,7 @@ type Client struct {
 	base      *url.URL
 	hc        *http.Client
 	encrypter ports.PayloadEncrypter
+	realIP    string
 }
 
 var _ ports.Publisher = (*Client)(nil)
@@ -53,7 +54,13 @@ func New(serverAddr string, hc *http.Client, key string, encrypter ports.Payload
 	if err != nil {
 		return nil, err
 	}
-	return &Client{base: u, hc: hc, key: strings.TrimSpace(key), encrypter: encrypter}, nil
+	return &Client{
+		base:      u,
+		hc:        hc,
+		key:       strings.TrimSpace(key),
+		encrypter: encrypter,
+		realIP:    localIP(),
+	}, nil
 }
 
 func normalizeBase(s string) string {
@@ -237,8 +244,67 @@ func (c *Client) newGzJSONRequest(ctx context.Context, path string, body []byte,
 	if encrypted {
 		req.Header.Set(c.encrypter.HeaderKey(), c.encrypter.HeaderValue())
 	}
+	if c.realIP != "" {
+		req.Header.Set("X-Real-IP", c.realIP)
+	}
 
 	return req, nil
+}
+
+func localIP() string {
+	return localIPFromAddrs(allInterfaceAddrs())
+}
+
+func localIPFromAddrs(addrs []net.Addr) string {
+	if ip := selectIP(addrs, func(ip net.IP) bool {
+		ip = ip.To4()
+		return ip != nil && !ip.IsLoopback()
+	}); ip != nil {
+		return ip.String()
+	}
+	if ip := selectIP(addrs, func(ip net.IP) bool {
+		ip = ip.To4()
+		return ip != nil && ip.IsLoopback()
+	}); ip != nil {
+		return ip.String()
+	}
+	return "127.0.0.1"
+}
+
+func allInterfaceAddrs() []net.Addr {
+	var out []net.Addr
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return out
+	}
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		out = append(out, addrs...)
+	}
+	return out
+}
+
+func selectIP(addrs []net.Addr, accept func(net.IP) bool) net.IP {
+	for _, addr := range addrs {
+		var ip net.IP
+		switch v := addr.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		default:
+		}
+		if ip == nil {
+			continue
+		}
+		if accept(ip) {
+			return ip
+		}
+	}
+	return nil
 }
 
 func (c *Client) sendWithRetry(ctx context.Context, mkReq func() (*http.Request, error)) (*http.Response, error) {

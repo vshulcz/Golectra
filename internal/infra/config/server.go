@@ -21,15 +21,17 @@ const (
 
 // ServerConfig describes how the HTTP server listens, stores data, and emits audit logs.
 type ServerConfig struct {
-	Address   string
-	File      string
-	DSN       string
-	Key       string
-	CryptoKey string
-	Interval  time.Duration
-	Restore   bool
-	AuditFile string
-	AuditURL  string
+	Address       string
+	GRPCAddress   string
+	File          string
+	DSN           string
+	Key           string
+	CryptoKey     string
+	TrustedSubnet string
+	Interval      time.Duration
+	Restore       bool
+	AuditFile     string
+	AuditURL      string
 }
 
 // LoadServerConfig resolves CLI flags, environment variables, and defaults (ENV > CLI > defaults).
@@ -65,16 +67,18 @@ func normalizeListenAndServeURL(s string) string {
 }
 
 type serverFlagOptions struct {
-	addrOpt      string
-	fileOpt      string
-	dsnOpt       string
-	keyOpt       string
-	cryptoKeyOpt string
-	configOpt    string
-	ivalOpt      int
-	restoreOpt   bool
-	auditFileOpt string
-	auditURLOpt  string
+	addrOpt          string
+	grpcAddrOpt      string
+	fileOpt          string
+	dsnOpt           string
+	keyOpt           string
+	cryptoKeyOpt     string
+	configOpt        string
+	ivalOpt          int
+	restoreOpt       bool
+	trustedSubnetOpt string
+	auditFileOpt     string
+	auditURLOpt      string
 }
 
 func parseServerFlags(args []string, out io.Writer) (serverFlagOptions, error) {
@@ -86,10 +90,13 @@ func parseServerFlags(args []string, out io.Writer) (serverFlagOptions, error) {
 
 	var opts serverFlagOptions
 	fs.StringVar(&opts.addrOpt, "a", "", fmt.Sprintf("HTTP listen address, default: %s", defaultListenAndServeAddr))
+	fs.StringVar(&opts.grpcAddrOpt, "g", "", "gRPC listen address (host:port)")
+	fs.StringVar(&opts.grpcAddrOpt, "grpc-address", "", "gRPC listen address (host:port)")
 	fs.StringVar(&opts.fileOpt, "f", "", fmt.Sprintf("FILE_STORAGE_PATH, default: %s", defaultFilePath))
 	fs.StringVar(&opts.dsnOpt, "d", "", fmt.Sprintf("DATABASE_DSN for Postgres, default: %s", defaultDSN))
 	fs.StringVar(&opts.keyOpt, "k", "", "secret key for HashSHA256")
 	fs.StringVar(&opts.cryptoKeyOpt, "crypto-key", "", "path to RSA private key for request decryption")
+	fs.StringVar(&opts.trustedSubnetOpt, "t", "", "trusted subnet (CIDR) for agent requests")
 	fs.StringVar(&opts.configOpt, "c", "", "path to JSON config file")
 	fs.StringVar(&opts.configOpt, "config", "", "path to JSON config file")
 	fs.IntVar(&opts.ivalOpt, "i", -1, fmt.Sprintf("STORE_INTERVAL seconds (0 - sync), default: %d", defaultStoreInterval))
@@ -108,10 +115,15 @@ func buildServerConfig(flags serverFlagOptions, fileCfg serverFileConfig) (Serve
 	if err != nil {
 		return ServerConfig{}, err
 	}
+	grpcAddr, err := resolveGRPCAddress(flags, fileCfg)
+	if err != nil {
+		return ServerConfig{}, err
+	}
 	file := resolveString([]string{"STORE_FILE", "FILE_STORAGE_PATH"}, flags.fileOpt, fileValue(fileCfg.StoreFile, defaultFilePath))
 	dsn := resolveString([]string{"DATABASE_DSN"}, flags.dsnOpt, fileValue(fileCfg.DatabaseDSN, ""))
 	key := resolveString([]string{"KEY"}, flags.keyOpt, fileValue(fileCfg.Key, ""))
 	cryptoKey := resolveString([]string{"CRYPTO_KEY"}, flags.cryptoKeyOpt, fileValue(fileCfg.CryptoKey, ""))
+	trustedSubnet := resolveString([]string{"TRUSTED_SUBNET"}, flags.trustedSubnetOpt, fileValue(fileCfg.TrustedSubnet, ""))
 	auditFile := resolveString([]string{"AUDIT_FILE"}, flags.auditFileOpt, fileValue(fileCfg.AuditFile, ""))
 	auditURL := resolveString([]string{"AUDIT_URL"}, flags.auditURLOpt, fileValue(fileCfg.AuditURL, ""))
 	interval, err := resolveServerInterval(flags, fileCfg)
@@ -121,15 +133,17 @@ func buildServerConfig(flags serverFlagOptions, fileCfg serverFileConfig) (Serve
 	restore := resolveServerRestore(flags, fileCfg)
 
 	return ServerConfig{
-		Address:   addr,
-		File:      file,
-		DSN:       dsn,
-		Key:       key,
-		CryptoKey: cryptoKey,
-		Interval:  interval,
-		Restore:   restore,
-		AuditFile: auditFile,
-		AuditURL:  auditURL,
+		Address:       addr,
+		GRPCAddress:   grpcAddr,
+		File:          file,
+		DSN:           dsn,
+		Key:           key,
+		CryptoKey:     cryptoKey,
+		TrustedSubnet: trustedSubnet,
+		Interval:      interval,
+		Restore:       restore,
+		AuditFile:     auditFile,
+		AuditURL:      auditURL,
 	}, nil
 }
 
@@ -141,6 +155,35 @@ func resolveServerAddress(flags serverFlagOptions, fileCfg serverFileConfig) (st
 		return "", fmt.Errorf("invalid listen address: %q", addr)
 	}
 	return addr, nil
+}
+
+func resolveGRPCAddress(flags serverFlagOptions, fileCfg serverFileConfig) (string, error) {
+	fileAddr := fileValue(fileCfg.GRPCAddress, "")
+	addr := resolveString([]string{"GRPC_ADDRESS"}, flags.grpcAddrOpt, fileAddr)
+	addr = normalizeGRPCListenAddress(addr)
+	if addr == "" {
+		return "", nil
+	}
+	if _, port, err := net.SplitHostPort(addr); err != nil || port == "" {
+		return "", fmt.Errorf("invalid gRPC listen address: %q", addr)
+	}
+	return addr, nil
+}
+
+func normalizeGRPCListenAddress(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+		if u, err := url.Parse(s); err == nil && u.Host != "" {
+			return u.Host
+		}
+	}
+	if !strings.Contains(s, ":") {
+		return ":" + s
+	}
+	return s
 }
 
 func resolveServerInterval(flags serverFlagOptions, fileCfg serverFileConfig) (time.Duration, error) {

@@ -22,32 +22,37 @@ func TestLoadServerConfig(t *testing.T) {
 			args: []string{},
 			env:  map[string]string{},
 			want: ServerConfig{
-				Address:   defaultListenAndServeAddr,
-				File:      defaultFilePath,
-				Interval:  ds(defaultStoreInterval),
-				Restore:   defaultRestore,
-				AuditFile: "",
-				AuditURL:  "",
+				Address:     defaultListenAndServeAddr,
+				File:        defaultFilePath,
+				Interval:    ds(defaultStoreInterval),
+				Restore:     defaultRestore,
+				AuditFile:   "",
+				AuditURL:    "",
+				GRPCAddress: "",
 			},
 		},
 		{
 			name: "env override flags",
-			args: []string{"-a", "http://127.0.0.1:9090", "-i", "42", "-f", "flags.json", "-r", "-audit-file", "flags.log"},
+			args: []string{"-a", "http://127.0.0.1:9090", "-g", "0.0.0.0:9999", "-i", "42", "-f", "flags.json", "-r", "-audit-file", "flags.log"},
 			env: map[string]string{
 				"ADDRESS":           "0.0.0.0:1234",
+				"GRPC_ADDRESS":      ":5555",
 				"STORE_INTERVAL":    "777s",
 				"FILE_STORAGE_PATH": "env.json",
 				"RESTORE":           "false",
 				"AUDIT_FILE":        "env-audit.log",
 				"AUDIT_URL":         "https://audit.example.com",
+				"TRUSTED_SUBNET":    "10.1.0.0/16",
 			},
 			want: ServerConfig{
-				Address:   "0.0.0.0:1234",
-				File:      "env.json",
-				Interval:  777 * time.Second,
-				Restore:   false,
-				AuditFile: "env-audit.log",
-				AuditURL:  "https://audit.example.com",
+				Address:       "0.0.0.0:1234",
+				GRPCAddress:   ":5555",
+				File:          "env.json",
+				Interval:      777 * time.Second,
+				Restore:       false,
+				AuditFile:     "env-audit.log",
+				AuditURL:      "https://audit.example.com",
+				TrustedSubnet: "10.1.0.0/16",
 			},
 		},
 		{
@@ -55,18 +60,20 @@ func TestLoadServerConfig(t *testing.T) {
 			args: []string{},
 			env: map[string]string{
 				"ADDRESS":           "http://0.0.0.0:5050",
+				"GRPC_ADDRESS":      "0.0.0.0:6060",
 				"STORE_INTERVAL":    "15s",
 				"FILE_STORAGE_PATH": "from-env.json",
 				"RESTORE":           "true",
 				"AUDIT_FILE":        "/tmp/audit.log",
 			},
 			want: ServerConfig{
-				Address:   "0.0.0.0:5050",
-				File:      "from-env.json",
-				Interval:  15 * time.Second,
-				Restore:   true,
-				AuditFile: "/tmp/audit.log",
-				AuditURL:  "",
+				Address:     "0.0.0.0:5050",
+				GRPCAddress: "0.0.0.0:6060",
+				File:        "from-env.json",
+				Interval:    15 * time.Second,
+				Restore:     true,
+				AuditFile:   "/tmp/audit.log",
+				AuditURL:    "",
 			},
 		},
 		{
@@ -84,12 +91,13 @@ func TestLoadServerConfig(t *testing.T) {
 			args: []string{"-i", "0", "-audit-url", "https://audit"},
 			env:  map[string]string{},
 			want: ServerConfig{
-				Address:   defaultListenAndServeAddr,
-				File:      defaultFilePath,
-				Interval:  0,
-				Restore:   defaultRestore,
-				AuditFile: "",
-				AuditURL:  "https://audit",
+				Address:     defaultListenAndServeAddr,
+				GRPCAddress: "",
+				File:        defaultFilePath,
+				Interval:    0,
+				Restore:     defaultRestore,
+				AuditFile:   "",
+				AuditURL:    "https://audit",
 			},
 		},
 		{
@@ -97,31 +105,33 @@ func TestLoadServerConfig(t *testing.T) {
 			args: []string{},
 			env:  map[string]string{"RESTORE": "true"},
 			want: ServerConfig{
-				Address:   defaultListenAndServeAddr,
-				File:      defaultFilePath,
-				Interval:  ds(defaultStoreInterval),
-				Restore:   true,
-				AuditFile: "",
-				AuditURL:  "",
+				Address:     defaultListenAndServeAddr,
+				GRPCAddress: "",
+				File:        defaultFilePath,
+				Interval:    ds(defaultStoreInterval),
+				Restore:     true,
+				AuditFile:   "",
+				AuditURL:    "",
 			},
 		},
 		{
 			name: "address accepts plain port (normalized to :port)",
 			args: []string{"-a", "9090"},
 			want: ServerConfig{
-				Address:   ":9090",
-				File:      defaultFilePath,
-				Interval:  ds(defaultStoreInterval),
-				Restore:   defaultRestore,
-				AuditFile: "",
-				AuditURL:  "",
+				Address:     ":9090",
+				GRPCAddress: "",
+				File:        defaultFilePath,
+				Interval:    ds(defaultStoreInterval),
+				Restore:     defaultRestore,
+				AuditFile:   "",
+				AuditURL:    "",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for _, k := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "CONFIG", "KEY", "DATABASE_DSN", "STORE_FILE"} {
+			for _, k := range []string{"ADDRESS", "GRPC_ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "CONFIG", "KEY", "DATABASE_DSN", "STORE_FILE", "TRUSTED_SUBNET"} {
 				t.Setenv(k, "")
 			}
 			for k, v := range tt.env {
@@ -145,6 +155,9 @@ func TestLoadServerConfig(t *testing.T) {
 			if got.Address != tt.want.Address {
 				t.Errorf("Address: want %q, got %q", tt.want.Address, got.Address)
 			}
+			if got.GRPCAddress != tt.want.GRPCAddress {
+				t.Errorf("GRPCAddress: want %q, got %q", tt.want.GRPCAddress, got.GRPCAddress)
+			}
 			if got.File != tt.want.File {
 				t.Errorf("File: want %q, got %q", tt.want.File, got.File)
 			}
@@ -167,13 +180,13 @@ func TestLoadServerConfig(t *testing.T) {
 func TestLoadServerConfig_FileConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/server.json"
-	cfg := `{"address":"0.0.0.0:1234","restore":true,"store_interval":"5s","store_file":"/tmp/file.db","database_dsn":"dsn","crypto_key":"priv.pem","key":"hmac","audit_file":"audit.log","audit_url":"https://audit"}`
+	cfg := `{"address":"0.0.0.0:1234","grpc_address":":6060","restore":true,"store_interval":"5s","store_file":"/tmp/file.db","database_dsn":"dsn","crypto_key":"priv.pem","key":"hmac","trusted_subnet":"10.0.0.0/24","audit_file":"audit.log","audit_url":"https://audit"}`
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
 	t.Setenv("CONFIG", path)
-	for _, k := range []string{"ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "KEY", "DATABASE_DSN", "STORE_FILE"} {
+	for _, k := range []string{"ADDRESS", "GRPC_ADDRESS", "STORE_INTERVAL", "FILE_STORAGE_PATH", "RESTORE", "AUDIT_FILE", "AUDIT_URL", "CRYPTO_KEY", "KEY", "DATABASE_DSN", "STORE_FILE", "TRUSTED_SUBNET"} {
 		t.Setenv(k, "")
 	}
 
@@ -182,10 +195,10 @@ func TestLoadServerConfig_FileConfig(t *testing.T) {
 		t.Fatalf("LoadServerConfig error: %v", err)
 	}
 
-	if got.Address != "0.0.0.0:1234" || got.File != "/tmp/file.db" || got.Interval != 5*time.Second {
+	if got.Address != "0.0.0.0:1234" || got.GRPCAddress != ":6060" || got.File != "/tmp/file.db" || got.Interval != 5*time.Second {
 		t.Fatalf("file config mismatch: %+v", got)
 	}
-	if !got.Restore || got.DSN != "dsn" || got.CryptoKey != "priv.pem" || got.Key != "hmac" {
+	if !got.Restore || got.DSN != "dsn" || got.CryptoKey != "priv.pem" || got.Key != "hmac" || got.TrustedSubnet != "10.0.0.0/24" {
 		t.Fatalf("file config mismatch: %+v", got)
 	}
 	if got.AuditFile != "audit.log" || got.AuditURL != "https://audit" {
@@ -196,14 +209,16 @@ func TestLoadServerConfig_FileConfig(t *testing.T) {
 func TestLoadServerConfig_FileConfig_Priority(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/server.json"
-	cfg := `{"address":"0.0.0.0:1234","store_interval":"5s","store_file":"file.json"}`
+	cfg := `{"address":"0.0.0.0:1234","grpc_address":"127.0.0.1:8888","store_interval":"5s","store_file":"file.json"}`
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
 	t.Setenv("CONFIG", path)
 	t.Setenv("ADDRESS", "127.0.0.1:7777")
+	t.Setenv("GRPC_ADDRESS", "127.0.0.1:9999")
 	t.Setenv("STORE_INTERVAL", "9s")
+	t.Setenv("TRUSTED_SUBNET", "192.168.1.0/24")
 
 	got, err := LoadServerConfig([]string{"-f", "flag.json"}, nil)
 	if err != nil {
@@ -212,11 +227,17 @@ func TestLoadServerConfig_FileConfig_Priority(t *testing.T) {
 	if got.Address != "127.0.0.1:7777" {
 		t.Fatalf("Address=%q want %q", got.Address, "127.0.0.1:7777")
 	}
+	if got.GRPCAddress != "127.0.0.1:9999" {
+		t.Fatalf("GRPCAddress=%q want %q", got.GRPCAddress, "127.0.0.1:9999")
+	}
 	if got.Interval != 9*time.Second {
 		t.Fatalf("Interval=%v want %v", got.Interval, 9*time.Second)
 	}
 	if got.File != "flag.json" {
 		t.Fatalf("File=%q want %q", got.File, "flag.json")
+	}
+	if got.TrustedSubnet != "192.168.1.0/24" {
+		t.Fatalf("TrustedSubnet=%q want %q", got.TrustedSubnet, "192.168.1.0/24")
 	}
 }
 
@@ -237,6 +258,23 @@ func TestNormalizeListenAndServeURL(t *testing.T) {
 	for in, want := range cases {
 		if got := normalizeListenAndServeURL(in); got != want {
 			t.Errorf("normalizeListenAndServeURL(%q): want %q, got %q", in, want, got)
+		}
+	}
+}
+
+func TestNormalizeGRPCListenAddress(t *testing.T) {
+	cases := map[string]string{
+		"":                      "",
+		"   ":                   "",
+		"9090":                  ":9090",
+		":9091":                 ":9091",
+		"0.0.0.0:3200":          "0.0.0.0:3200",
+		"http://127.0.0.1:7000": "127.0.0.1:7000",
+		"https://host:7001":     "host:7001",
+	}
+	for in, want := range cases {
+		if got := normalizeGRPCListenAddress(in); got != want {
+			t.Errorf("normalizeGRPCListenAddress(%q): want %q, got %q", in, want, got)
 		}
 	}
 }

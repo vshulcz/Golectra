@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -139,6 +140,124 @@ func TestGzipRequest_Decompresses(t *testing.T) {
 	}
 	if got := rec.Body.String(); got != "hello" {
 		t.Fatalf("body=%q want %q", got, "hello")
+	}
+}
+
+func TestTrustedSubnet_AllowsWhenUnset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(TrustedSubnet(nil))
+	router.GET("/ok", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ok", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestTrustedSubnet_RejectsOutside(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	_, subnet, err := net.ParseCIDR("10.0.0.0/24")
+	if err != nil {
+		t.Fatalf("parse cidr: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(TrustedSubnet(subnet))
+	router.GET("/guard", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/guard", nil)
+	req.Header.Set("X-Real-IP", "192.168.1.10")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestTrustedSubnet_AllowsInside(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	_, subnet, err := net.ParseCIDR("10.0.0.0/24")
+	if err != nil {
+		t.Fatalf("parse cidr: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(TrustedSubnet(subnet))
+	router.GET("/guard", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/guard", nil)
+	req.Header.Set("X-Real-IP", "10.0.0.10")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestTrustedSubnet_RejectsInvalidHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	_, subnet, err := net.ParseCIDR("10.0.0.0/24")
+	if err != nil {
+		t.Fatalf("parse cidr: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(TrustedSubnet(subnet))
+	router.GET("/guard", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/guard", nil)
+	req.Header.Set("X-Real-IP", "not-an-ip")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestTrustedSubnet_RejectsMissingHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	_, subnet, err := net.ParseCIDR("10.0.0.0/24")
+	if err != nil {
+		t.Fatalf("parse cidr: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(TrustedSubnet(subnet))
+	router.GET("/guard", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/guard", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want %d", rec.Code, http.StatusForbidden)
 	}
 }
 

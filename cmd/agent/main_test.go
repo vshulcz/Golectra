@@ -28,3 +28,10 @@ func TestAgentConfigAlias(t *testing.T) {
 		t.Fatalf("agent.Config=%+v want %+v", got, cfg)
 	}
 }
+
+func TestPrintBuildInfo(t *testing.T) {
+	buildVersion = "test"
+	buildDate = "date"
+	buildCommit = "commit"
+	printBuildInfo()
+}
